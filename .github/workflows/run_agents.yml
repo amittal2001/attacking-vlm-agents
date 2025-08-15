@@ -27,8 +27,9 @@ jobs:
           source /opt/conda/etc/profile.d/conda.sh
           conda activate winarena
 
-      - name: Run experiment
-        shell: bash
-        run: |
+     - name: Run experiment
+       shell: bash
+       run: |
           cd scripts
-          python3 run_azure.py --experiments_json "experiments.json"
+          python run_azure.py --experiments_json "experiments.json"
+
