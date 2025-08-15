@@ -11,10 +11,8 @@ jobs:
       image: ghcr.io/amittal2001/winarena-env:latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u amittal2001 --password-stdin
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Azure Login with Service Principal
         uses: azure/login@v2
