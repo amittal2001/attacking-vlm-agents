@@ -25,4 +25,4 @@ jobs:
         shell: bash -l {0}
         run: |
           cd scripts
-          python run_azure.py --experiments_json "experiments.json"
+          python3 run_azure.py --experiments_json "experiments.json"
