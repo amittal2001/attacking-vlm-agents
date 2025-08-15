@@ -5,5 +5,14 @@ COPY requirements.txt /tmp/requirements.txt
 
 RUN conda env create -f /tmp/environment.yml
 
+RUN apt-get update && \
+    apt-get install -y curl apt-transport-https lsb-release gnupg && \
+    curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null && \
+    AZ_REPO=$(lsb_release -cs) && \
+    echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ $AZ_REPO main" | tee /etc/apt/sources.list.d/azure-cli.list && \
+    apt-get update && \
+    apt-get install -y azure-cli && \
+    rm -rf /var/lib/apt/lists/*
+
 SHELL ["conda", "run", "-n", "winarena", "/bin/bash", "-c"]
 
