@@ -24,10 +24,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Azure CLI login (Device Code)
-        uses: azure/login@v2
-        with:
-          auth-type: DEVICE_CODE
+      - name: Azure login
+        shell: bash
+        run: az login --use-device-code
 
       - name: Run experiment
         shell: bash -l {0}
