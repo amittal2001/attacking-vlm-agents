@@ -21,8 +21,14 @@ jobs:
           environment: azurecloud
           allow-no-subscriptions: false
 
+      - name: activate env
+        shell: bash
+        run: |
+          source /opt/conda/etc/profile.d/conda.sh
+          conda activate winarena
+
       - name: Run experiment
-        shell: bash -l {0}
+        shell: bash
         run: |
           cd scripts
           python3 run_azure.py --experiments_json "experiments.json"
