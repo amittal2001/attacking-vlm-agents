@@ -1,0 +1,36 @@
+name: Run Agents
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-experiment:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: winarena
+          auto-update-conda: true
+          python-version: "3.19"
+
+      - name: Install dependencies
+        shell: bash -l {0}
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Azure CLI login
+        uses: azure/login@v2
+        with:
+          use-device-code: true
+
+      - name: Run experiment
+        shell: bash -l {0}
+        run: |
+          cd scripts
+          python run_azure.py --experiments_json "experiments.json"
