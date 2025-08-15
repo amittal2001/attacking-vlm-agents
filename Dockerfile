@@ -1,10 +1,12 @@
 FROM continuumio/miniconda3:latest
 
+# Copy environment file
 COPY environment.yml /tmp/environment.yml
-COPY requirements.txt /tmp/requirements.txt
 
+# Create conda environment from environment.yml
 RUN conda env create -f /tmp/environment.yml
 
+# Install Azure CLI
 RUN apt-get update && \
     apt-get install -y curl apt-transport-https lsb-release gnupg && \
     curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null && \
@@ -14,5 +16,6 @@ RUN apt-get update && \
     apt-get install -y azure-cli && \
     rm -rf /var/lib/apt/lists/*
 
-SHELL ["conda", "run", "-n", "winarena", "/bin/bash", "-c"]
-
+# Force container to use winarena env python & pip
+ENV PATH="/opt/conda/envs/winarena/bin:$PATH"
+ENV CONDA_DEFAULT_ENV=winarena

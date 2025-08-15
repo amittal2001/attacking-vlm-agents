@@ -6,4 +6,8 @@ dependencies:
   - python=3.9
   - pip
   - pip:
-      - -r requirements.txt
+      - azure-ai-ml
+      - azure-identity
+      - azureml-core
+      - azureml-dataset-runtime
+      - pandas
