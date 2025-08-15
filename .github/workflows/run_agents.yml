@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: ghcr.io/amittal2001/winarena-env:latest
+      image: ghcr.io/amittal2001/winarena-env
 
     steps:
       - name: Checkout repository
