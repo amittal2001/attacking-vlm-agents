@@ -34,3 +34,4 @@ jobs:
         run: |
           cd scripts
           python run_azure.py --experiments_json "experiments.json"
+
