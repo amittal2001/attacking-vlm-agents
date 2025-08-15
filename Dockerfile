@@ -1,6 +1,7 @@
 FROM continuumio/miniconda3:latest
 
 COPY environment.yml /tmp/environment.yml
+COPY requirements.txt /tmp/requirements.txt
 
 RUN conda env create -f /tmp/environment.yml
 
