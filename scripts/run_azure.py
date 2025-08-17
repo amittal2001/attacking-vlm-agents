@@ -74,6 +74,10 @@ def launch_vm_and_job(  worker_id,
                         use_managed_identity: bool,
                         json_name: str,
                         model_name: str,
+                        epsilon: str,
+                        alpha: str,
+                        num_steps: str,
+                        target_action: str,
                         run_mode: str,
                         som_origin: str,
                         a11y_backend: str
@@ -171,7 +175,7 @@ def launch_vm_and_job(  worker_id,
 
     src = ScriptRunConfig(source_directory="./azure_files",
                         script='run_entry.py',
-                        arguments=[input, output, exp_name, num_workers, worker_id, agent, json_name, model_name, run_mode, som_origin, a11y_backend],
+                        arguments=[input, output, exp_name, num_workers, worker_id, agent, json_name, model_name, run_mode, epsilon, alpha, num_steps, target_action, som_origin, a11y_backend],
                         run_config=run_config)
 
     experiment = Experiment(workspace=ws, name=exp_name)  
@@ -233,7 +237,8 @@ def launch_experiment(config):
     for i in range(config['num_workers']):
         p = Process(target=launch_vm_and_job, args=(i, config['exp_name'], docker_config, config['datastore_input_path'], 
             config['num_workers'], config['agent'], azure_config, config['docker_img_name'], config['ci_startup_script_path'],
-            config['use_managed_identity'], config['json_name'], config['model_name'], config['run_mode'], config['som_origin'], config['a11y_backend']))
+            config['use_managed_identity'], config['json_name'], config['model_name'], config['run_mode'], config.get('epsilon',""),
+            config.get('alpha',""), config.get('num_steps',""), config.get('target_action',""), config['som_origin'], config['a11y_backend']))
         experiments.append(p)
         p.start()
 

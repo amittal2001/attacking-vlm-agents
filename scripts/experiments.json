@@ -7,9 +7,13 @@
     "exp_name": "exp1",
     "num_workers": 4,
     "use_managed_identity": false,
-    "json_name": "evaluation_examples_windows/test_all.json",
+    "json_name": "evaluation_examples_windows/test_custom.json",
     "model_name": "gpt-4-1106-vision-preview",
-    "run_mode": "run.py",
+    "run_mode": "run_pgd_attack.py",
+    "epsilon": 0.03,
+    "alpha": 0.01,
+    "num_steps": 40,
+    "target_action": "yes",
     "som_origin": "oss",
     "a11y_backend": "win32"
   }

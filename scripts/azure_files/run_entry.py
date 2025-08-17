@@ -13,8 +13,12 @@ def main():
     json_name = sys.argv[7]
     model_name = sys.argv[8]
     run_mode = sys.argv[9]
-    som_origin = sys.argv[10]
-    a11y_backend = sys.argv[11]
+    epsilon = sys.argv[10]
+    alpha = sys.argv[11]
+    num_steps = sys.argv[12]
+    target_action = sys.argv[13]
+    som_origin = sys.argv[14]
+    a11y_backend = sys.argv[15]
 
     # print all args
     print("All args:")
@@ -73,7 +77,7 @@ def main():
     os.system("/entry_setup.sh") # since it's in root we can just do /script.sh and don't need cd /
 
     # launches the client script
-    os.system(f"cd /client && python {run_mode} --agent_name {agent} --worker_id {worker_id} --num_workers {num_workers} --result_dir {result_dir} --test_all_meta_path {json_name} --model {model_name} --som_origin {som_origin} --a11y_backend {a11y_backend}")
+    os.system(f"cd /client && python {run_mode} --agent_name {agent} --worker_id {worker_id} --num_workers {num_workers} --result_dir {result_dir} --test_all_meta_path {json_name} --model {model_name} --som_origin {som_origin} --a11y_backend {a11y_backend} --epsilon {epsilon} --alpha {alpha} --num_steps {num_steps} --target_action {target_action}")
 
     print("Finished running entry script")
 
