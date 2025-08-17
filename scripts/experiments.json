@@ -9,10 +9,8 @@
     "use_managed_identity": false,
     "json_name": "evaluation_examples_windows/test_all.json",
     "model_name": "gpt-4-1106-vision-preview",
+    "run_mode": "run.py",
     "som_origin": "oss",
-    "a11y_backend": "win32",
-    "_start_time": "2025-08-11 20:31:43",
-    "_stop_time": "2025-08-11 20:32:31",
-    "_done": true
+    "a11y_backend": "win32"
   }
 }
