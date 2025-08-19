@@ -157,3 +157,4 @@ class VLMWhiteBoxPGDAttack:
         
         logger.info("PGD attack finished.")
         return x_adv
+    

@@ -21,7 +21,22 @@ def prev_actions_to_string(prev_actions, n_prev=3):
     for i in range(1, n_prev + 1):  
         action = prev_actions[-i]  # Get the element at index -i (from the end)  
         result += f"Screen is currently at time step T. Below is the action executed at time step T-{i}: \n{action}\n\n"  
-    return result  
+    return result 
+
+from sentence_transformers import SentenceTransformer
+import torch
+
+# Load a sentence transformer model
+emb_model = SentenceTransformer('all-MiniLM-L6-v2')
+def embed_fn(text):
+    """
+    Convert text string to a torch tensor embedding.
+    """
+    # model.encode returns numpy array, convert to torch tensor
+    emb = emb_model.encode(text, convert_to_tensor=True)
+    emb = emb.float()  # ensure float32
+    emb.requires_grad_(True)  # necessary for PGD
+    return emb 
 
 from PIL import Image
 
@@ -450,7 +465,366 @@ class NaviAgent:
                 actions = ["WAIT"]
 
         return response, actions, logs, computer_update_args
+ 
 
+    def pgd_attack(self, instruction: str, obs: Dict, targeted_plan_result, epsilon=0.1, alpha=0.01, iters=10) -> List:
+        """
+        Perform a PGD attack on the current observation.
+        """
+        logs={}
+        
+        if self.obs_view == "screen":
+            image_file = BytesIO(obs['screenshot'])
+            view_image = Image.open(image_file)
+            view_rect = [0, 0, view_image.width, view_image.height]
+        else:
+            view_image = obs['window_image']
+            view_rect = obs['window_rect']
+        
+        window_title, window_names_str, window_rect, computer_clipboard = obs['window_title'], obs['window_names_str'], obs['window_rect'], obs['computer_clipboard']
+        original_h, original_w = view_image.height, view_image.width
+        
+        override_plan = False
+        
+        # if the window is different, maximize it
+        if self.auto_window_maximize:
+            # when we call .maximize(), windows switches to a overflow window for 1 step, so we need to ignore it
+            if "System tray" not in window_title and "Defender" not in window_title:
+                if window_title != self.prev_window_title and window_rect != self.prev_window_rect:
+                    # debug logging {{{
+                    logs['window_title'] = window_title
+                    logs['window_rect'] = window_rect
+                    logs['prev_window_title'] = self.prev_window_title
+                    logs['prev_window_rect'] = self.prev_window_rect
+                    # }}} debug logging
+                    self.prev_window_title = window_title
+                    self.prev_window_rect = window_rect
+                    code_result = "\n".join([
+                        "# forcing step to execute auto_window_maximize...",
+                        "computer.os.maximize_window()"
+                    ])
+                    plan_result = f"```python\n{code_result}\n```"
+                    w, h = original_w, original_h
+                    rects = []
+                    override_plan = True
+                
+        if not override_plan:
+            logger.info("Processing screenshot...")
+            
+            image  = view_image
+            w,h = original_w, original_h
+            logs['foreground_window'] = image
+            
+            # extract regions
+            if self.som_origin == "a11y":
+                # a11y extractor
+                from mm_agents.navi.a11y_demo import propose_ents as get_a11y_ents
+                rendering = "N/A"
+                regions = get_a11y_ents(obs['accessibility_tree'])
+                rects = [[int(ent["shape"]["x"]), int(ent["shape"]["y"]), int((ent["shape"]["x"]+ent["shape"]["width"])), int((ent["shape"]["y"]+ent["shape"]["height"]))] for ent in regions]
+                color_mapping_debug = {"a11y": "red"}
+                color_mapping_prompt = {"a11y": "red"}
+                image_debug, image_prompt, list_of_text = self.parser_to_prompt(image, regions, color_mapping_debug, color_mapping_prompt) # full set-of-marks drawing w/ visibility filtering, overlap detection, and colors
+                logs['foreground_window_regions'] = image_debug
+            
+            elif self.som_origin == "mixed": #TODO: combine a11y and internal extractorsin a cleaner way
+                # combine both a11y and internal extractors
+                
+                # a11y extractor
+                from mm_agents.navi.a11y_demo import propose_ents as get_a11y_ents, get_mask_from_entities, filter_entities_with_mask, detections_to_entities
+                from mm_agents.navi.screenparsing_oss.utils.som import  filter_entities
+                import numpy as np
+                rendering = "N/A"
+                regions = get_a11y_ents(obs['accessibility_tree'])
+                regions = filter_entities(regions)
+                mask = get_mask_from_entities(regions, image.width, image.height)
+                #convert mask to pil
+                mask_img = np.stack([mask]*3, axis=-1).astype(np.uint8)
+                logs['foreground_window_mask'] = Image.fromarray(mask_img*255)
+                # proprietary extractor
+                detected_regions, rendering_ex = self.extractor.build_regions(image)
+                
+                
+                id_list, rects = self.extractor.get_rect_list(detected_regions)
+                list_of_text = self.extractor.create_text_list(detected_regions, image.width, image.height)
+                
+                # create logging image with all the tags
+                image_debug_ex = copy.deepcopy(image)
+                color_mapping_debug = {"images": "red", "ocr": "blue", "icons": "green", "text/html": "magenta"}
+                try:
+                    image_debug_ex = draw_colored_image(image_debug_ex, detected_regions, color_mapping_debug, draw_numbers=True)
+                except Exception as e:
+                    logger.error("Did not find regions in the image. Error:", e)
+                logs['foreground_window_regions_models'] = image_debug_ex
+                
+                regions_ex = detections_to_entities(detected_regions)
+                
+                new_regions = filter_entities_with_mask(regions_ex, mask, th=0.5)
+                
+                regions += new_regions
+                rects = [[int(ent["shape"]["x"]), int(ent["shape"]["y"]), int((ent["shape"]["x"]+ent["shape"]["width"])), int((ent["shape"]["y"]+ent["shape"]["height"]))] for ent in regions]
+                color_mapping_debug = {"a11y": "red", "images": "blue", "ocr": "blue", "icons": "green", "text/html": "magenta"}
+                color_mapping_prompt = {"a11y": "red", "images": "blue", "icons": "green"}
+                image_debug, image_prompt, list_of_text = self.parser_to_prompt(image, regions, color_mapping_debug, color_mapping_prompt) # full set-of-marks drawing w/ visibility filtering, overlap detection, and colors
+                logs['foreground_window_regions'] = image_debug
+                logs['foreground_window_prompt'] = image_prompt
+                
+            elif self.som_origin == "mixed-oss": 
+                # combine both a11y and internal extractors
+                
+                # a11y extractor
+                from mm_agents.navi.a11y_demo import propose_ents as get_a11y_ents, get_mask_from_entities, filter_entities_with_mask, detections_to_entities
+                from mm_agents.navi.screenparsing_oss.utils.som import  filter_entities
+                import numpy as np
+                rendering = "N/A"
+                regions = get_a11y_ents(obs['accessibility_tree'])
+                regions = filter_entities(regions)
+                mask = get_mask_from_entities(regions, image.width, image.height)
+                #convert mask to pil
+                mask_img = np.stack([mask]*3, axis=-1).astype(np.uint8)
+                logs['foreground_window_mask'] = Image.fromarray(mask_img*255)
+                
+                
+                # oss extractor
+                regions_ex = self.extractor.propose_ents(image)
+                
+                # create logging image with all the tags
+                color_mapping_debug = {"a11y": "red", "image": "red", "text": "blue", "icon": "green"}
+                try:
+                    image_debug_ex, _, models_debug_txt = self.parser_to_prompt(image, regions_ex, color_mapping_debug, color_mapping_debug)
+                    # logs['entity_list_len'] = len(regions_ex)
+                    # logs['entity_list_models'] = models_debug_txt
+                except Exception as e:
+                    logger.error("Did not find regions in the image. Error:", e)
+                logs['foreground_window_regions_models'] = image_debug_ex
+                
+                
+                # combine both outputs
+                new_regions = filter_entities_with_mask(regions_ex, mask, th=0.5)
+                regions += new_regions
+                
+                rects = [[int(ent["shape"]["x"]), int(ent["shape"]["y"]), int((ent["shape"]["x"]+ent["shape"]["width"])), int((ent["shape"]["y"]+ent["shape"]["height"]))] for ent in regions]
+                color_mapping_debug = {"a11y": "red", "image": "red", "text": "blue", "icon": "green", "text/html": "magenta"}
+                color_mapping_prompt = {"a11y": "red", "image": "red", "icon": "green"}
+                image_debug, image_prompt, list_of_text = self.parser_to_prompt(image, regions, color_mapping_debug, color_mapping_prompt) # full set-of-marks drawing w/ visibility filtering, overlap detection, and colors
+                logs['foreground_window_regions'] = image_debug
+                logs['foreground_window_prompt'] = image_prompt
+            
+            elif self.som_origin == "mixed-omni":
+                # combine both a11y and omni extractors
+                
+                # a11y extractor
+                from mm_agents.navi.a11y_demo import propose_ents as get_a11y_ents, get_mask_from_entities, filter_entities_with_mask, detections_to_entities, filter_nonvis_and_oob_entities
+                from mm_agents.navi.screenparsing_oss.utils.som import  filter_entities
+                import numpy as np
+                rendering = "N/A"
+                regions_a11y = get_a11y_ents(obs['accessibility_tree'])
+                regions_a11y = filter_entities(regions_a11y)
+                regions_a11y = filter_nonvis_and_oob_entities(regions_a11y, image.width, image.height)
+                mask = get_mask_from_entities(regions_a11y, image.width, image.height)
+                #convert mask to pil
+                mask_img = np.stack([mask]*3, axis=-1).astype(np.uint8)
+                logs['foreground_window_mask'] = Image.fromarray(mask_img*255)
+                
+                
+                # omni extractor
+                rendering = "N/A"
+                regions_omni = self.omni_proposal.propose_ents(image, with_captions=False)
+                
+                # create logging image
+                color_mapping_debug = {"a11y": "magenta", "image": "red", "text": "blue", "icon": "green"}
+                try:
+                    image_debug_ex, _, models_debug_txt = self.parser_to_prompt(image, regions_a11y + regions_omni, color_mapping_debug, color_mapping_debug)
+                    logs['foreground_window_regions_a11y_models'] = image_debug_ex
+                except Exception: pass
+                
+                # combine both outputs
+                regions_omni = filter_entities_with_mask(regions_omni, mask, th=0.5)
+                regions = regions_a11y + regions_omni
+                
+                ### DEBUG CAPTION INPUT
+                # width, height = image.size
+                # ents_rects = [
+                #     (ent, (
+                #         ent['shape']['x'] / width, 
+                #         ent['shape']['y'] / height, 
+                #         (ent['shape']['x'] + ent['shape']['width']) / width, 
+                #         (ent['shape']['y'] + ent['shape']['height']) / height
+                #     ))
+                #     for ent in regions
+                #     if not ent.get('text', '').strip()
+                # ]
+                # target_ents, target_rects = [list(tup) for tup in zip(*ents_rects)]
+                # logs['target_ents_before'] = copy.deepcopy(target_ents)
+                # logs['target_ents'] = target_ents
+                # logs['target_rects'] = target_rects
+                ###
+                
+                # perform omni captioning on unlabeled ents
+                try:
+                    logs['parsed_content_icon'] = self.omni_proposal.caption_ents(image, regions)
+                except Exception as e:
+                    logger.error("Failed to caption icons.", e)
+                
+                # try to organize a11y tree into "icon" and "text" so on-screen text set-of-marks can be reduced
+                for region in regions:
+                    width, height = region['shape']['width'], region['shape']['height']
+                    is_90_percent_square = 0.9 <= width / height <= 1.1
+                    if region['type'] == 'a11y':
+                        region['type'] = 'icon' if is_90_percent_square else 'text'
+                
+                rects = [[int(ent["shape"]["x"]), int(ent["shape"]["y"]), int((ent["shape"]["x"]+ent["shape"]["width"])), int((ent["shape"]["y"]+ent["shape"]["height"]))] for ent in regions]
+                color_mapping_debug = {"image": "red", "text": "blue", "icon": "green"}
+                color_mapping_prompt = {"image": "red", "icon": "green"}
+                image_debug, image_prompt, list_of_text = self.parser_to_prompt(image, regions, color_mapping_debug, color_mapping_prompt) # full set-of-marks drawing w/ visibility filtering, overlap detection, and colors
+                logs['foreground_window_regions'] = image_debug
+                logs['foreground_window_prompt'] = image_prompt
+                
+            elif self.som_origin == "omni":
+                
+                # omni extractor
+                rendering = "N/A"
+                regions = self.omni_proposal.propose_ents(image, with_captions=True)
+                
+                rects = [[int(ent["shape"]["x"]), int(ent["shape"]["y"]), int((ent["shape"]["x"]+ent["shape"]["width"])), int((ent["shape"]["y"]+ent["shape"]["height"]))] for ent in regions]
+                color_mapping_debug = {"image": "red", "text": "blue", "icon": "green"}
+                color_mapping_prompt = {"image": "red", "icon": "green"}
+                image_debug, image_prompt, list_of_text = self.parser_to_prompt(image, regions, color_mapping_debug, color_mapping_prompt) # full set-of-marks drawing w/ visibility filtering, overlap detection, and colors
+                logs['foreground_window_regions'] = image_debug
+                logs['foreground_window_prompt'] = image_prompt
+
+            else:
+                # OSS extractor
+                rendering = "N/A"
+                regions = self.extractor.propose_ents(image)
+                
+                rects = [[int(ent["shape"]["x"]), int(ent["shape"]["y"]), int((ent["shape"]["x"]+ent["shape"]["width"])), int((ent["shape"]["y"]+ent["shape"]["height"]))] for ent in regions]
+                color_mapping_debug = {"image": "red", "text": "blue", "icon": "green", "text/html": "magenta"}
+                color_mapping_prompt = {"image": "red", "icon": "green"}
+                image_debug, image_prompt, list_of_text = self.parser_to_prompt(image, regions, color_mapping_debug, color_mapping_prompt) # full set-of-marks drawing w/ visibility filtering, overlap detection, and colors
+                logs['foreground_window_regions'] = image_debug
+
+            # construct prompt
+            prev_actions_str = prev_actions_to_string(self.prev_actions, self.n_prev)
+
+            logs['window_title'] = window_title
+            logs['window_names_str'] = window_names_str
+            logs['computer_clipboard'] = computer_clipboard
+            logs['image_width'] = image.width
+            logs['image_height'] = image.height
+            logs['regions'] = regions
+
+            user_question = planner_messages.build_user_msg_visual(instruction, window_title, window_names_str, computer_clipboard, rendering, list_of_text, prev_actions_str, self.memory_block_text)
+            logs['user_question'] = user_question
+            
+            image_resized, w_resized, h_resized, factor = resize_image_openai(view_image)
+            image_prompt_resized, w_resized, h_resized, factor = resize_image_openai(image_prompt)
+            
+            image_prompts = [image_resized, image_prompt_resized]
+            if self.use_last_screen:
+                last_image = self.last_image if self.last_image is not None else image_resized
+                self.last_image = image_resized
+                logs['last_image'] = last_image
+                
+                #image_prompts = [last_image] + image_prompts
+                image_prompts = [last_image, image_prompt_resized]
+
+            # send to gpt
+            logger.info("Thinking...")
+
+            import torch
+            adv_image_prompts = image_prompts.clone().detach().requires_grad_(True)
+            # PGD loop
+            for i in range(iters):
+                response = self.gpt4v_planner.plan(adv_image_prompts, user_question)
+
+                loss = self._compute_attack_loss(response, targeted_plan_result)
+
+                # Backprop
+                loss.backward()
+
+                # Gradient step
+                with torch.no_grad():
+                    adv_image_prompts = adv_image_prompts + alpha * adv_image_prompts.grad.sign()
+                    adv_image_prompts = torch.min(torch.max(adv_image_prompts, obs - epsilon), obs + epsilon)  # clamp
+                    adv_image_prompts = adv_image_prompts.detach().requires_grad_(True)
+
+        logs['plan_result'] = plan_result
+
+        # extract the textual memory block
+        memory_block = re.search(r'```memory\n(.*?)```', plan_result, re.DOTALL)
+        if memory_block:
+            self.memory_block_text = '```memory\n' + memory_block.group(1) + '```'
+
+        # extract the plan which is in a ```python ...``` code block
+        code_block = re.search(r'```python\n(.*?)```', plan_result, re.DOTALL)
+        if code_block:
+            code_block_text = code_block.group(1)
+            code_block_text = remove_min_leading_spaces(code_block_text)
+            actions = [code_block_text]
+        else:
+            logger.error("Plan not found")
+            code_block_text = "# plan not found"
+            actions = ["# plan not found"]
+
+        self.prev_actions.append(code_block_text)
+        scale = (original_w/w, original_h/h)
+
+        response = ""
+        computer_update_args = {
+            'rects': rects,
+            'window_rect': view_rect,
+            'screenshot': view_image,
+            'scale': scale,
+            'clipboard_content': computer_clipboard,
+            'swap_ctrl_alt': False
+        }
+
+        self.step_counter += 1
+
+        # actions = code_block.split("\n")
+        # remove empty lines and comments
+        # actions = [action for action in actions if action.strip() and not action.strip().startswith("#")]
+
+        # extract the high-level decision block
+        decision_block = re.search(r'```decision\n(.*?)```', plan_result, re.DOTALL)
+        if decision_block:
+            self.decision_block_text = decision_block.group(1)
+            if "DONE" in self.decision_block_text:
+                actions = ["DONE"]
+            elif "FAIL" in self.decision_block_text:
+                actions = ["FAIL"]
+            elif "WAIT" in self.decision_block_text:
+                actions = ["WAIT"]
+
+        return response, actions, logs, computer_update_args, adv_image_prompts
+    
+
+
+    
+    def _compute_attack_loss(self, response_text, target_text, embed_fn=embed_fn):
+        """
+        Compute differentiable loss between two texts.
+
+        Args:
+            response_text: string produced by the agent
+            target_text: target string you want PGD to approach
+            embed_fn: a callable that maps string -> torch tensor embedding
+
+        Returns:
+            torch scalar loss
+        """
+        import torch
+
+        # Convert texts to embeddings
+        resp_emb = embed_fn(response_text)  # shape: [D], requires_grad=True
+        target_emb = embed_fn(target_text)  # shape: [D]
+
+        # Example: maximize similarity (negative cosine distance)
+        cos_sim = torch.cosine_similarity(resp_emb, target_emb, dim=0)
+        loss = 1 - cos_sim  # smaller loss = closer to target
+
+        return loss
 
     def reset(self):
         self.memory_block_text = self.memory_block_text_empty
@@ -460,3 +834,4 @@ class NaviAgent:
         self.clipboard_content = None
         self.step_counter = 0
         self.last_image = None
+
