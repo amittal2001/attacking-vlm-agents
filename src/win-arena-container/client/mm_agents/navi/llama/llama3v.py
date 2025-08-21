@@ -105,8 +105,7 @@ class Llama3Vision:
                           temperature=temperature,
                           top_p=0.95)
 
-        with torch.no_grad():
-            output = self.model.generate(**inputs, **gen_kwargs)
+        output = self.model.generate(**inputs, **gen_kwargs)
 
         text = self.processor.decode(output[0], skip_special_tokens=True)
         return text
