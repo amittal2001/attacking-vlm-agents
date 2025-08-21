@@ -4,6 +4,7 @@ import re
 from typing import Dict, List
 # from mm_agents.planner.computer import Computer, WindowManager
 from mm_agents.navi.gpt.gpt4v_planner import GPT4V_Planner
+from mm_agents.navi.llama.llama3v_planner import Llama3v_Planner
 from mm_agents.navi.gpt import planner_messages
 import copy
 from io import BytesIO
@@ -88,7 +89,7 @@ class NaviAgent:
     def __init__(
             self,
             server: str = "azure",
-            model: str = "gpt-4o", # openai or "phi3-v"
+            model: str = "meta-llama/Llama-3.2-11B-Vision-Instruct", # openai or "phi3-v" or llama-3.2-11b-vision-instruct
             som_config = None,
             som_origin = "oss", # "oss", "a11y", "mixed-oss", "omni", "mixed-omni"
             obs_view = "screen", # "screen" or "window"
@@ -126,13 +127,16 @@ class NaviAgent:
             from mm_agents.navi.screenparsing_oss.omniparser.omniparser import Omniparser
             self.omni_proposal = Omniparser()
 
-        if model == 'phi3-v':
+        if model == "meta-llama/Llama-3.2-11B-Vision-Instruct":
+            from mm_agents.navi.llama.llama3v_planner import Llama3v_Planner
+            self.planner = Llama3v_Planner(model=model,temperature=temperature)
+        elif model == 'phi3-v':
             from mm_agents.navi.gpt.phi3_planner import Phi3_Planner
-            self.gpt4v_planner = Phi3_Planner(server='azure',model='phi3-v',temperature=temperature)
+            self.planner = Phi3_Planner(server='azure',model='phi3-v',temperature=temperature)
         else:
-            self.gpt4v_planner = GPT4V_Planner(server=self.server, model=self.model, temperature=temperature)
+            self.planner = GPT4V_Planner(server=self.server, model=self.model, temperature=temperature)
             if use_last_screen:
-                self.gpt4v_planner.system_prompt = planner_messages.planning_system_message_shortened_previmg
+                self.planner.system_prompt = planner_messages.planning_system_message_shortened_previmg
         
         from mm_agents.navi.screenparsing_oss.utils.obs import parser_to_prompt
         self.parser_to_prompt = parser_to_prompt
@@ -414,7 +418,7 @@ class NaviAgent:
 
             # send to gpt
             logger.info("Thinking...")
-            plan_result = self.gpt4v_planner.plan(image_prompts, user_question)
+            plan_result = self.planner.plan(image_prompts, user_question)
 
         logs['plan_result'] = plan_result
 
@@ -736,7 +740,7 @@ class NaviAgent:
             adv_image_prompts = image_prompts.clone().detach().requires_grad_(True)
             # PGD loop
             for i in range(iters):
-                response = self.gpt4v_planner.plan(adv_image_prompts, user_question)
+                response = self.planner.plan(adv_image_prompts, user_question)
 
                 loss = self._compute_attack_loss(response, targeted_plan_result)
 

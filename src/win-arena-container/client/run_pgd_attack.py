@@ -76,38 +76,6 @@ def config() -> argparse.Namespace:
     # environment config
     parser.add_argument(
         "--headless", action="store_true", help="Run in headless machine"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     )
     parser.add_argument("--action_space", type=str, default="pyautogui", help="Action type")
     parser.add_argument(
@@ -135,7 +103,7 @@ def config() -> argparse.Namespace:
     parser.add_argument("--test_config_base_dir", type=str, default="evaluation_examples_windows")
 
     # lm config
-    parser.add_argument("--model", type=str, default="gpt-4-vision-preview") #gpt-4o-mini or gpt-4-vision-preview or gpt-4o or gpt-4-1106-vision-preview
+    parser.add_argument("--model", type=str, default="meta-llama/Llama-3.2-11B-Vision-Instruct") #gpt-4o-mini or gpt-4-vision-preview or gpt-4o or gpt-4-1106-vision-preview
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=0.9)
     parser.add_argument("--max_tokens", type=int, default=1500)
@@ -296,7 +264,7 @@ def test(
             try:
                 agent.reset()
                 obs = env.reset(task_config=example)
-                response, actions, logs, computer_update_args, adv_image_prompts = agent.predict(
+                response, actions, logs, computer_update_args, adv_image_prompts = agent.pgd_attack(
                     instruction,
                     obs
                 )
