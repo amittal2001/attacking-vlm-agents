@@ -25,6 +25,46 @@ from azureml.core.environment import Environment, DockerSection
 from azureml.data.dataset_consumption_config import DatasetConsumptionConfig
 from azureml.data import OutputFileDatasetConfig
 
+
+
+
+
+import base64, io, requests
+from typing import Union, List, Optional
+from PIL import Image
+import torch
+from transformers import AutoProcessor, MllamaForConditionalGeneration
+import os
+import inspect
+import re
+
+import tiktoken
+import time
+import json
+import re
+import argparse
+import datetime
+import json
+import logging
+import os
+import random
+import sys
+import shutil
+import traceback
+# import wandb
+
+from tqdm import tqdm
+
+
+import requests
+import time
+
+from threading import Event
+import signal
+
+
+
+
 # Create a directory for logs if it doesn't exist
 log_directory = "./azure_logs"
 os.makedirs(log_directory, exist_ok=True)
