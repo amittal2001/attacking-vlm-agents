@@ -17,7 +17,6 @@ from tqdm import tqdm
 import lib_run_single
 from desktop_env.envs.desktop_env import DesktopEnv
 from mm_agents.navi.agent import NaviAgent
-from PGDAttacks import VLMWhiteBoxPGDAttack
 import requests
 import time
 
