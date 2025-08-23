@@ -13,6 +13,7 @@
     "epsilon": 0.03,
     "alpha": 0.01,
     "num_steps": 40,
+    "wandb_key": "905e6d9ca6ee9a10c60ee894c70083c76eb8be6a",
     "target_action": "yes",
     "som_origin": "oss",
     "a11y_backend": "win32"

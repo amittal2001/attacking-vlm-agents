@@ -59,7 +59,12 @@ def load_args_as_dict():
     parser.add_argument('--use_managed_identity', type=bool, default=False, help='Use Managed Identity (default: False)')  
     parser.add_argument('--json_name', default='evaluation_examples_windows/test_all.json', help='Name of the JSON file (default: evaluation_examples_windows/test_all.json)')  
     parser.add_argument('--model_name', default='gpt-4o-mini', help='Model name (default: gpt-4o-mini)') #gpt-4o-mini or gpt-4-vision-preview or gpt-4o or gpt-4-1106-vision-preview  
-    parser.add_argument('--run_mode', default='run.py', help='Script to run')
+    parser.add_argument('--run_mode', default='run.py', help='Script to run') 
+    parser.add_argument('--epsilon', default=0.03, help='PGD epsilon') 
+    parser.add_argument('--alpha', default=0.01, help='PGD alpha') 
+    parser.add_argument('--num_steps', default=40, help='PGD steps to run') 
+    parser.add_argument('--target_action', default='yes', help='PGD target output')
+    parser.add_argument('--wandb_key', default='', help='wandb key')
     parser.add_argument('--som_origin', default='oss', help='Origin of the SOM (default: internal)') #internal or oss or a11y or mixed  
     parser.add_argument('--a11y_backend', default='uia', help='Type of acc tree. uia more precise, win32 faster') #uia (slower) or win32 (faster)
     args, _ = parser.parse_known_args()
@@ -77,11 +82,12 @@ def launch_vm_and_job(  worker_id,
                         use_managed_identity: bool,
                         json_name: str,
                         model_name: str,
+                        run_mode: str,
                         epsilon: str,
                         alpha: str,
                         num_steps: str,
                         target_action: str,
-                        run_mode: str,
+                        wandb_key: str,
                         som_origin: str,
                         a11y_backend: str
                         ):
@@ -178,7 +184,7 @@ def launch_vm_and_job(  worker_id,
 
     src = ScriptRunConfig(source_directory="./azure_files",
                         script='run_entry.py',
-                        arguments=[input, output, exp_name, num_workers, worker_id, agent, json_name, model_name, run_mode, epsilon, alpha, num_steps, target_action, som_origin, a11y_backend],
+                        arguments=[input, output, exp_name, num_workers, worker_id, agent, json_name, model_name, run_mode, epsilon, alpha, num_steps, target_action, wandb_key, som_origin, a11y_backend],
                         run_config=run_config)
 
     experiment = Experiment(workspace=ws, name=exp_name)  
@@ -241,7 +247,7 @@ def launch_experiment(config):
         p = Process(target=launch_vm_and_job, args=(i, config['exp_name'], docker_config, config['datastore_input_path'], 
             config['num_workers'], config['agent'], azure_config, config['docker_img_name'], config['ci_startup_script_path'],
             config['use_managed_identity'], config['json_name'], config['model_name'], config['run_mode'], config.get('epsilon',""),
-            config.get('alpha',""), config.get('num_steps',""), config.get('target_action',""), config['som_origin'], config['a11y_backend']))
+            config.get('alpha',""), config.get('num_steps',""), config.get('target_action',""), config.get('wandb_key',""), config['som_origin'], config['a11y_backend']))
         experiments.append(p)
         p.start()
 

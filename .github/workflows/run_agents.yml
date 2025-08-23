@@ -27,11 +27,6 @@ jobs:
           source /opt/conda/etc/profile.d/conda.sh
           conda activate winarena
 
-      - name: connecting to wandb
-        shell: bash
-        run: |
-          wandb login ${{ secrets.WANDB_CREDENTIALS }}
-
       - name: Run experiment
         shell: bash
         run: |

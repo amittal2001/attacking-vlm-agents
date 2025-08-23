@@ -471,7 +471,7 @@ class NaviAgent:
         return response, actions, logs, computer_update_args
  
 
-    def pgd_attack(self, instruction: str, obs: Dict, targeted_plan_result, wandb_run=None, epsilon=0.1, alpha=0.01, iters=10) -> List:
+    def pgd_attack(self, instruction: str, obs: Dict, targeted_plan_result, epsilon=0.1, alpha=0.01, iters=10, wandb_run=None) -> List:
         """
         Perform a PGD attack on the current observation.
         """

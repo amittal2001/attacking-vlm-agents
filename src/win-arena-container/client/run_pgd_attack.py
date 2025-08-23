@@ -132,39 +132,12 @@ def config() -> argparse.Namespace:
     parser.add_argument("--alpha", type=float, default=0.01, help="Alpha for PGD attack")
     parser.add_argument("--num_steps", type=int, default=40, help="Number of steps for PGD attack")
     parser.add_argument("--target_action", type=str, default="yes", help="Target action for PGD attack")
+    parser.add_argument("--wandb_key", type=str, default="", help="WANDB key")
 
     args, unknownargs = parser.parse_known_args()
 
     return args
 
-def initialize_wandb():
-    """
-    Initializes a new Weights & Biases run.
-
-    Returns:
-        A W&B run object if initialization is successful, otherwise None.
-    """
-    if not config.WANDB_LOGGING:
-        logging.info("W&B logging is disabled in the configuration.")
-        return None
-    try:
-        run = wandb.init(
-            project=config.WANDB_PROJECT,
-            config={
-                "model_id": config.MODEL_ID,
-                "system_prompt": config.SYSTEM_PROMPT,
-                "user_prompt": config.USER_PROMPT,
-                "target_text": config.TARGET_TEXT,
-                "eps": config.EPS,
-                "alpha": config.ALPHA,
-                "steps": config.STEPS,
-            }
-        )
-        logging.info(f"W&B run initialized successfully. Run name: {run.name}")
-        return run
-    except Exception as e:
-        logging.error(f"Failed to initialize W&B: {e}")
-        return None
     
 def test(
         args: argparse.Namespace,
@@ -175,7 +148,6 @@ def test(
 
     # log args
     logger.info("Args: %s", args)
-    # set wandb project
     cfg_args = \
     {
         "headless": args.headless,
@@ -200,7 +172,18 @@ def test(
         "num_workers": args.num_workers,
     }
     
-    wandb_run = initialize_wandb()
+    # set wandb project
+    wandb.login(key=args.wandb_key)
+    wandb_run = wandb.init(
+        project="mip-generator-attack",   
+        name="experiment-1",         
+        config={
+            "targeted_plan_result":args.target_action,
+            "epsilon":args.epsilon,
+            "alpha":args.alpha,
+            "iters":args.num_steps
+        }
+    )
 
     if cfg_args["agent_name"] == "navi":
         if cfg_args["som_origin"] in ["a11y", "omni", "mixed-omni"]:
@@ -308,6 +291,10 @@ def test(
                 response, actions, logs, computer_update_args, adv_image_prompts = agent.pgd_attack(
                     instruction,
                     obs,
+                    targeted_plan_result=args.target_action,
+                    epsilon=args.epsilon,
+                    alpha=args.alpha,
+                    iters=args.num_steps,
                     wandb_run=wandb_run
                 )
                 
