@@ -21,10 +21,9 @@ jobs:
           password: ${{ secrets.DOCKER_TOKEN }}
 
       - name: Update Azure Image
-        uses: docker/build-push-action@v4
-        with:
-          push: true
-          tags: amittal2001/winarena-custom:latest
+        run: |
+          docker build -t amittal2001/winarena-custom:latest .
+          docker push amittal2001/winarena-custom:latest
         
       - name: Azure Login with Service Principal
         uses: azure/login@v2
