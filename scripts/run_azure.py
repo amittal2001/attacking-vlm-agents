@@ -222,7 +222,7 @@ def launch_vm_and_job(  worker_id,
     # get logs:
     log_dir = "./logs"
     os.makedirs(log_dir, exist_ok=True)
-    run.download_files(prefix="azureml-logs", output_directory=log_dir)
+    run.download_files(prefix="user-logs", output_directory=log_dir)
 
     # Print out the logs
     import sys
