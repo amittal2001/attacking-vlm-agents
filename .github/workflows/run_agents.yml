@@ -20,17 +20,22 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      #- name: Update Azure Image
-      #  run: |
-      #    docker build -t amittal2001/winarena-custom:latest .
-      #    docker push amittal2001/winarena-custom:latest
-        
-      #- name: Azure Login with Service Principal
-      #  uses: azure/login@v2
-      #  with:
-      #    creds: ${{ secrets.AZURE_CREDENTIALS }}
-      #    environment: azurecloud
-      #    allow-no-subscriptions: false
+      - name: Update Azure Image
+        run: |
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: amittal2001/winarena-custom:latest
+          cache-from: type=registry,ref=amittal2001/winarena-custom:latest
+          cache-to: type=registry,mode=max,ref=amittal2001/winarena-custom:latest
+       
+      - name: Azure Login with Service Principal
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          environment: azurecloud
+          allow-no-subscriptions: false
 
       - name: Activate conda environment
         shell: bash
