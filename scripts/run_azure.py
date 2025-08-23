@@ -196,7 +196,27 @@ def launch_vm_and_job(  worker_id,
     # Monitor the job  
     logging.info("Waiting for job completion...")
     run.wait_for_completion(show_output=False)  
-  
+    
+
+    # get logs:
+    log_dir = "./logs"
+    os.makedirs(log_dir, exist_ok=True)
+    run.download_files(prefix="azureml-logs", output_directory=log_dir)
+
+    # Print out the logs
+    import sys
+    for root, dirs, files in os.walk(log_dir):
+        for file in files:
+            filepath = os.path.join(root, file)
+            print(f"\n===== {filepath} =====\n", file=sys.stdout, flush=True)
+            try:
+                with open(filepath, "r") as f:
+                    for line in f:
+                        print(line, end="", file=sys.stdout, flush=True)
+            except UnicodeDecodeError:
+                print("(binary file, skipped)", file=sys.stdout, flush=True)
+
+
     # Delete the VM once the job is done  
     logging.info(f"Deleting compute instance {compute_instance_name}...")  
     delete_poller = ml_client.compute.begin_delete(compute_instance_name)
