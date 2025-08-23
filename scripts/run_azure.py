@@ -127,6 +127,8 @@ def launch_vm_and_job(  worker_id,
     except:
         # start the compute instance, if it doesn't exist
         logging.info(f"Creating compute instance {compute_instance_name}...")
+        idle_time_before_shutdown_minutes=600
+        idle_time_before_shutdown_minutes=1
 
         if use_managed_identity:
             identity_config = ManagedIdentityConfiguration(
@@ -144,7 +146,7 @@ def launch_vm_and_job(  worker_id,
             compute_instance = ComputeInstance(name=compute_instance_name, 
                                     size="Standard_D8_v3", 
                                     setup_scripts=setup_scripts,
-                                    idle_time_before_shutdown_minutes=600,
+                                    idle_time_before_shutdown_minutes=idle_time_before_shutdown_minutes,
                                     ssh_public_access_enabled=True,
                                     identity=identity
                                     )
@@ -152,7 +154,7 @@ def launch_vm_and_job(  worker_id,
             compute_instance = ComputeInstance(name=compute_instance_name, 
                                     size="Standard_D8_v3", 
                                     setup_scripts=setup_scripts,
-                                    idle_time_before_shutdown_minutes=600,
+                                    idle_time_before_shutdown_minutes=idle_time_before_shutdown_minutes,
                                     ssh_public_access_enabled=True
                                     )
         ml_client.begin_create_or_update(compute_instance).result()
@@ -237,17 +239,17 @@ def launch_vm_and_job(  worker_id,
 
 
     # Delete the VM once the job is done  
-    logging.info(f"Deleting compute instance {compute_instance_name}...")  
-    delete_poller = ml_client.compute.begin_delete(compute_instance_name)
+    #logging.info(f"Deleting compute instance {compute_instance_name}...")  
+    #delete_poller = ml_client.compute.begin_delete(compute_instance_name)
     
     # Wait for resource cleanup  
-    try:
-        logging.info("Waiting for instance deletion...")
-        delete_poller.result()
-        time.sleep(60)
-    except Exception as err:
-        logging.error("Error while waiting for instance deletion...")
-        logging.exception(err)
+    #try:
+    #    logging.info("Waiting for instance deletion...")
+    #    delete_poller.result()
+    #    time.sleep(60)
+    #except Exception as err:
+    #    logging.error("Error while waiting for instance deletion...")
+    #    logging.exception(err)
     
 
 def launch_experiment(config):
