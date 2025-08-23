@@ -471,7 +471,7 @@ class NaviAgent:
         return response, actions, logs, computer_update_args
  
 
-    def pgd_attack(self, instruction: str, obs: Dict, targeted_plan_result, epsilon=0.1, alpha=0.01, iters=10) -> List:
+    def pgd_attack(self, instruction: str, obs: Dict, targeted_plan_result, wandb_run=None, epsilon=0.1, alpha=0.01, iters=10) -> List:
         """
         Perform a PGD attack on the current observation.
         """
@@ -737,18 +737,22 @@ class NaviAgent:
             logger.info("Thinking...")
 
             import torch
-            adv_image_prompts = image_prompts.clone().detach().requires_grad_(True)
+            adv_last_image = last_image.clone().detach().requires_grad_(True)
             # PGD loop
             for i in range(iters):
                 response = self.planner.plan(adv_image_prompts, user_question)
 
                 loss = self._compute_attack_loss(response, targeted_plan_result)
+                
+                if wandb_run:
+                    wandb_run.log({"step": i, "loss": loss.item()})
 
                 # Backprop
                 loss.backward()
 
                 # Gradient step
                 with torch.no_grad():
+                    adv_image_prompts = [adv_last_image, image_prompt_resized]
                     adv_image_prompts = adv_image_prompts + alpha * adv_image_prompts.grad.sign()
                     adv_image_prompts = torch.min(torch.max(adv_image_prompts, obs - epsilon), obs + epsilon)  # clamp
                     adv_image_prompts = adv_image_prompts.detach().requires_grad_(True)
@@ -801,7 +805,7 @@ class NaviAgent:
             elif "WAIT" in self.decision_block_text:
                 actions = ["WAIT"]
 
-        return response, actions, logs, computer_update_args, adv_image_prompts
+        return response, actions, logs, computer_update_args, adv_last_image
     
 
 

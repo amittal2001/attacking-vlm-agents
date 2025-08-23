@@ -21,7 +21,7 @@ class Llama3v_Planner:
         self.system_prompt =  planner_messages.planning_system_message
 
     def plan(self, images, user_query):  
-        response = self.gpt4v.process_images(self.system_prompt, user_query, images, max_tokens=4096, temperature=self.temperature, only_text=True)
+        response = self.llama.process_images(self.system_prompt, user_query, images, max_tokens=4096, temperature=self.temperature, only_text=True)
         return response
 
     def describe_elements(self, screenshot, crops, descriptions=None) -> str:

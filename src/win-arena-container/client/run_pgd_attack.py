@@ -10,7 +10,7 @@ import random
 import sys
 import shutil
 import traceback
-# import wandb
+import wandb
 
 from tqdm import tqdm
 
@@ -22,6 +22,8 @@ import time
 
 from threading import Event
 import signal
+from io import BytesIO
+from PIL import Image
 
 
 print("Waiting for the server to start...")
@@ -135,6 +137,35 @@ def config() -> argparse.Namespace:
 
     return args
 
+def initialize_wandb():
+    """
+    Initializes a new Weights & Biases run.
+
+    Returns:
+        A W&B run object if initialization is successful, otherwise None.
+    """
+    if not config.WANDB_LOGGING:
+        logging.info("W&B logging is disabled in the configuration.")
+        return None
+    try:
+        run = wandb.init(
+            project=config.WANDB_PROJECT,
+            config={
+                "model_id": config.MODEL_ID,
+                "system_prompt": config.SYSTEM_PROMPT,
+                "user_prompt": config.USER_PROMPT,
+                "target_text": config.TARGET_TEXT,
+                "eps": config.EPS,
+                "alpha": config.ALPHA,
+                "steps": config.STEPS,
+            }
+        )
+        logging.info(f"W&B run initialized successfully. Run name: {run.name}")
+        return run
+    except Exception as e:
+        logging.error(f"Failed to initialize W&B: {e}")
+        return None
+    
 def test(
         args: argparse.Namespace,
         test_all_meta: dict
@@ -168,6 +199,8 @@ def test(
         "worker_id": args.worker_id,
         "num_workers": args.num_workers,
     }
+    
+    wandb_run = initialize_wandb()
 
     if cfg_args["agent_name"] == "navi":
         if cfg_args["som_origin"] in ["a11y", "omni", "mixed-omni"]:
@@ -263,10 +296,23 @@ def test(
             try:
                 agent.reset()
                 obs = env.reset(task_config=example)
+                
+                if wandb_run:
+                    if obs == "screen":
+                        image_file = BytesIO(obs['screenshot'])
+                        image = Image.open(image_file)
+                    else:
+                        image = obs['window_image']
+                    wandb_run.log({"original_image": wandb.Image(image)})
+                
                 response, actions, logs, computer_update_args, adv_image_prompts = agent.pgd_attack(
                     instruction,
-                    obs
+                    obs,
+                    wandb_run=wandb_run
                 )
+                
+                if wandb_run:
+                    wandb_run.log({"adv_image": wandb.Image(adv_image_prompts[0])})
 
                 # Save trajectory as JSONL
                 with open(os.path.join(example_result_dir, "traj.jsonl"), "w") as f:
@@ -382,25 +428,99 @@ def get_result(action_space, use_model, observation_type, result_dir, trial_id, 
 
 
 
+exit_event = Event()
+def quit(signo, _frame):
+    print("Interrupted by %d, shutting down" % signo)
+    exit_event.set()
+    exit(0)
 
+    
+def wait_for_server(ip, port=5000):
+    while not exit_event.is_set():
+        try:
+            response = requests.get("http://"+ip+":"+str(port)+"/probe", timeout=7)
+            print("Response from server:", response.json())
+            break  # If the request is successful, break the loop
+        except Exception as e:
+            print("Failed to get hello:", e)
+            print("Retrying...")
+            exit_event.wait(5)  # Wait for 5 seconds before retrying
 
+# Handling keyboard interrupts
+for sig in ('TERM', 'HUP', 'INT'):
+    signal.signal(getattr(signal, 'SIG'+sig), quit)
 
+if __name__ == '__main__':
+    ####### The complete version of the list of examples #######
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    args = config()
+    setup_logging(args)
 
+    wait_for_server(args.emulator_ip)
 
+    with open(args.test_all_meta_path, "r", encoding="utf-8") as f:
+        test_all_meta = json.load(f)
 
+    logger.info(f"\nTESTING ON TASK JSON PATH: {args.test_all_meta_path}")
 
+    if args.domain != "all":
+        test_all_meta = {args.domain: test_all_meta[args.domain]}
+    
+    if args.num_workers == 1:
+        test_file_list = get_unfinished(
+            args.action_space,
+            args.model,
+            args.observation_type,
+            args.result_dir,
+            args.trial_id,
+            test_all_meta
+        )
+    else:
+        # if we have more than one worker (Azure runs) then we distribute the tasks equally
+        # otherwise they will try to delete each other's partial results in get_unfinished
+        test_file_list = test_all_meta
 
+    left_info = ""
+    for domain in test_file_list:
+        left_info += f"{domain}: {len(test_file_list[domain])}\n"
+    logger.info(f"Left tasks:\n{left_info}")
 
+    # distribute tasks among workers
+        # Flatten your dict into a list of tasks  
+    all_tasks_test  = [(domain, example_id) for domain in test_file_list for example_id in test_file_list[domain]]  
 
+    # Calculate the start and end indices of the tasks for this worker    
+    tasks_per_worker = len(all_tasks_test) // args.num_workers    
+    extra = len(all_tasks_test) % args.num_workers  # calculate the number of tasks that can't be evenly distributed  
+    
+    start_index = args.worker_id * tasks_per_worker + min(args.worker_id, extra)  
+    if args.worker_id < extra:  
+        end_index = start_index + tasks_per_worker + 1  
+    else:  
+        end_index = start_index + tasks_per_worker  
+    
+    # Slice the tasks for this worker  
+    tasks_for_this_worker = all_tasks_test[start_index:end_index]
 
+    # log which tasks this worker is doing
+    logger.info(f"Worker {args.worker_id} is doing tasks: {tasks_for_this_worker}")
+  
+    # Convert the list of tasks back to a dictionary  
+    test_file_list_worker = {}  
+    for domain, example_id in tasks_for_this_worker:  
+        if domain not in test_file_list_worker: 
+            # create an empty list to which elements will be appended 
+            test_file_list_worker[domain] = []  
+        test_file_list_worker[domain].append(example_id)  
 
-
-
-
-
-
-
-
+    get_result(args.action_space,
+        args.model,
+        args.observation_type,
+        args.result_dir,
+        args.trial_id,
+        test_file_list_worker
+    )
+    test(args, test_file_list_worker)
 
 
 exit_event = Event()
@@ -408,7 +528,6 @@ def quit(signo, _frame):
     print("Interrupted by %d, shutting down" % signo)
     exit_event.set()
     exit(0)
-
 
 
 
@@ -443,28 +562,6 @@ if __name__ == '__main__':
 
     if args.domain != "all":
         test_all_meta = {args.domain: test_all_meta[args.domain]}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     if args.num_workers == 1:
         test_file_list = get_unfinished(
