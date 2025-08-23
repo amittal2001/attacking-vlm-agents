@@ -128,7 +128,7 @@ def launch_vm_and_job(  worker_id,
         # start the compute instance, if it doesn't exist
         logging.info(f"Creating compute instance {compute_instance_name}...")
         idle_time_before_shutdown_minutes=600
-        idle_time_before_shutdown_minutes=1
+        idle_time_before_shutdown_minutes=15
 
         if use_managed_identity:
             identity_config = ManagedIdentityConfiguration(
