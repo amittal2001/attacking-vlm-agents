@@ -182,6 +182,25 @@ def launch_vm_and_job(  worker_id,
     input = input_dataset.as_named_input('input').as_mount('/tmp/input')
     output = OutputFileDatasetConfig(destination=(datastore, '/agent_outputs/'))
 
+    params = {
+        "exp_name": exp_name,
+        "num_workers": num_workers,
+        "worker_id": worker_id,
+        "agent": agent,
+        "json_name": json_name,
+        "model_name": model_name,
+        "run_mode": run_mode,
+        "epsilon": epsilon,
+        "alpha": alpha,
+        "num_steps": num_steps,
+        "target_action": target_action,
+        "wandb_key": wandb_key,
+        "som_origin": som_origin,
+        "a11y_backend": a11y_backend
+    }
+
+    logging.info("Experiment parameters: %s", params)
+
     src = ScriptRunConfig(source_directory="./azure_files",
                         script='run_entry.py',
                         arguments=[input, output, exp_name, num_workers, worker_id, agent, json_name, model_name, run_mode, epsilon, alpha, num_steps, target_action, wandb_key, som_origin, a11y_backend],
