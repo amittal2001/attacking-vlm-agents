@@ -222,20 +222,32 @@ def launch_vm_and_job(  worker_id,
     # get logs:
     log_dir = "./logs"
     os.makedirs(log_dir, exist_ok=True)
-    run.download_files(prefix="user-logs", output_directory=log_dir)
+    prefixes = [
+        "azureml-logs",
+        "user_logs",
+    ]
 
-    # Print out the logs
-    import sys
-    for root, dirs, files in os.walk(log_dir):
-        for file in files:
-            filepath = os.path.join(root, file)
-            print(f"\n===== {filepath} =====\n", file=sys.stdout, flush=True)
-            try:
-                with open(filepath, "r") as f:
-                    for line in f:
-                        print(line, end="", file=sys.stdout, flush=True)
-            except UnicodeDecodeError:
-                print("(binary file, skipped)", file=sys.stdout, flush=True)
+    # Download and print each prefix
+    for prefix in prefixes:
+        run.download_files(prefix=prefix, output_directory=log_dir)
+        
+        # Print the downloaded files for this prefix
+        prefix_path = os.path.join(log_dir, prefix)
+        if os.path.exists(prefix_path):
+            if os.path.isfile(prefix_path):
+                files_to_print = [prefix_path]
+            else:
+                files_to_print = [os.path.join(prefix_path, f) for f in os.listdir(prefix_path)]
+            for file in files_to_print:
+                print(f"\n===== {file} =====\n", flush=True)
+                try:
+                    with open(file, "r") as f:
+                        for line in f:
+                            print(line, end="", flush=True)
+                except UnicodeDecodeError:
+                    print("(binary file, skipped)", flush=True)
+        else:
+            print(f"No files found for prefix: {prefix}")
 
 
     # Delete the VM once the job is done  
