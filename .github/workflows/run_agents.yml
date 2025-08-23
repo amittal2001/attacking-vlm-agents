@@ -21,7 +21,6 @@ jobs:
           password: ${{ secrets.DOCKER_TOKEN }}
 
       - name: Update Azure Image
-        run: |
         uses: docker/build-push-action@v4
         with:
           context: .
