@@ -28,6 +28,8 @@ jobs:
           tags: amittal2001/winarena-custom:latest
           cache-from: type=registry,ref=amittal2001/winarena-custom:latest
           cache-to: type=registry,mode=max,ref=amittal2001/winarena-custom:latest
+          build-args: BUILDKIT_INLINE_CACHE=1
+          load: true
        
       - name: Azure Login with Service Principal
         uses: azure/login@v2
