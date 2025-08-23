@@ -14,10 +14,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Update Azure Image
-        shell: bash
+      - name: Log in to Docker
         run: |
           echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Update Azure Image
+        run: |
           docker build -t amittal2001/winarena-custom:latest .
           docker push amittal2001/winarena-custom:latest
         
