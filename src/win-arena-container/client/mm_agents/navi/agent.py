@@ -741,7 +741,7 @@ class NaviAgent:
 
             # If last_image is a PIL Image, convert it to tensor
             transform = T.ToTensor()  # converts to [0,1] float tensor
-            last_image_tensor = transform(last_image).unsqueeze(0)  # add batch dim
+            last_image_tensor = transform(last_image.convert("RGB")).unsqueeze(0)  # add batch dim
             adv_last_image = last_image_tensor.clone().detach().requires_grad_(True)
             # PGD loop
             for i in range(iters):

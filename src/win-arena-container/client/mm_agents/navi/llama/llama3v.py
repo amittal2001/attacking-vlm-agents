@@ -66,39 +66,26 @@ class Llama3Vision:
     def process_images(self,
                        system_prompt: str,
                        question: str,
-                       images: Union[str, Image.Image, List[Union[str, Image.Image]]],
+                       images: torch.Tensor,
                        max_tokens=512,
                        temperature=0.0,
                        only_text=True,
                        format="JPEG") -> str:
+            
+        # Ensure batch dimension
+        if images.dim() == 3:   # [C,H,W]
+            images = images.unsqueeze(0)  # -> [1,C,H,W]
+        elif images.dim() != 4:
+            raise ValueError(f"Unsupported tensor shape {images.shape}, expected [C,H,W] or [B,C,H,W]")
+
 
         if not isinstance(images, list):
             images = [images]
 
-        # For HF llama, we don’t actually send `content` JSON; we need PIL images.
-        # So convert any base64/url payloads into a real PIL.Image
-        pil_images = []
-        for img in images:
-            if isinstance(img, str) and img.startswith("http"):
-                # download
-                resp = requests.get(img)
-                pil_images.append(Image.open(io.BytesIO(resp.content)).convert("RGB"))
-            elif isinstance(img, str):  # local path
-                pil_images.append(Image.open(img).convert("RGB"))
-            elif isinstance(img, Image.Image):
-                pil_images.append(img.convert("RGB"))
-            else:
-                raise ValueError(f"Unsupported image input type: {type(img)}")
-
         # Build text prompt
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n" + question
 
-        # Currently llama-3.2 vision supports single image best
-        if len(pil_images) > 1:
-            print("⚠️ Warning: multi-image may not be fully supported, using first image.")
-        image = pil_images[0]
-
-        inputs = self.processor(images=image, text=prompt, return_tensors="pt").to(self.device, self.torch_dtype)
+        inputs = self.processor(images=images, text=prompt, return_tensors="pt").to(self.device, self.torch_dtype)
 
         gen_kwargs = dict(max_new_tokens=max_tokens,
                           do_sample=(temperature > 0),
