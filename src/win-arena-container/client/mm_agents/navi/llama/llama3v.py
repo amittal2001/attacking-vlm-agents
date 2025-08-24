@@ -78,10 +78,6 @@ class Llama3Vision:
         elif images.dim() != 4:
             raise ValueError(f"Unsupported tensor shape {images.shape}, expected [C,H,W] or [B,C,H,W]")
 
-
-        if not isinstance(images, list):
-            images = [images]
-
         # Build text prompt
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<image>\n" + question
 
