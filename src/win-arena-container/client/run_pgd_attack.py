@@ -132,7 +132,8 @@ def config() -> argparse.Namespace:
     parser.add_argument("--alpha", type=float, default=0.01, help="Alpha for PGD attack")
     parser.add_argument("--num_steps", type=int, default=40, help="Number of steps for PGD attack")
     parser.add_argument("--target_action", type=str, default="yes", help="Target action for PGD attack")
-    parser.add_argument("--wandb_key", type=str, default="", help="WANDB key")
+    parser.add_argument("--wandb_key", type=str, default="", help="wandb key")
+    parser.add_argument("--hugginface_key", type=str, default="", help="hugginface key")
 
     args, unknownargs = parser.parse_known_args()
 
@@ -172,7 +173,11 @@ def test(
         "num_workers": args.num_workers,
     }
     
-    # set wandb project
+    # set hugginface token
+    from huggingface_hub import login
+    login(args.hugginface_key)
+    
+    # wandb init
     wandb.login(key=args.wandb_key)
     wandb_run = wandb.init(
         project="mip-generator-attack",   
