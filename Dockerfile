@@ -1,5 +1,6 @@
 # Start from the WAA base image
-FROM windowsarena/winarena:latest
+#FROM windowsarena/winarena:latest
+FROM amittal2001/winarena-base:latest
 
 # Copy your requirements
 COPY requirements.txt /tmp/requirements.txt
