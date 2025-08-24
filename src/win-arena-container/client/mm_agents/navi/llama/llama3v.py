@@ -83,7 +83,7 @@ class Llama3Vision:
             images = [images]
 
         # Build text prompt
-        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n" + question
+        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<image>\n" + question
 
         inputs = self.processor(images=images, text=prompt, return_tensors="pt").to(self.device, self.torch_dtype)
 
