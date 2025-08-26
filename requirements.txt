@@ -8,4 +8,5 @@ accelerate>=0.32.0
 safetensors>=0.4.3
 transformers>=4.42.0
 sentence-transformers
+torchvision
 huggingface_hub

@@ -3,6 +3,7 @@ from typing import Union, List, Optional
 from PIL import Image
 import torch
 from transformers import AutoProcessor, MllamaForConditionalGeneration
+import torchvision.transforms as T
 
 class Llama3Vision:
     def __init__(self, model_id: str = "meta-llama/Llama-3.2-11B-Vision-Instruct",
@@ -66,13 +67,22 @@ class Llama3Vision:
     def process_images(self,
                        system_prompt: str,
                        question: str,
-                       images: torch.Tensor,
+                       images: Union[torch.Tensor, Image.Image, List[Image.Image]],
                        max_tokens=512,
                        temperature=0.0,
                        only_text=True,
                        format="JPEG") -> str:
             
-        # Ensure batch dimension
+            
+            
+        # convert images to tensor
+        if isinstance(images, list):
+            images = images [0]
+        if isinstance(images, Image.Image):
+            images = T.ToTensor()(images)  # -> [C,H,W]
+            images = images.unsqueeze(0)   # -> [1,C,H,W]    
+            # Ensure batch dimension
+            
         if images.dim() == 3:   # [C,H,W]
             images = images.unsqueeze(0)  # -> [1,C,H,W]
         elif images.dim() != 4:
