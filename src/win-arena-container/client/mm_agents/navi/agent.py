@@ -737,10 +737,15 @@ class NaviAgent:
             logger.info("Thinking...")
 
             import torch
-            adv_last_image = last_image.clone().detach().requires_grad_(True)
+            import torchvision.transforms as T
+
+            # If last_image is a PIL Image, convert it to tensor
+            transform = T.ToTensor()  # converts to [0,1] float tensor
+            last_image_tensor = transform(last_image.convert("RGB")).unsqueeze(0)  # add batch dim
+            adv_last_image = last_image_tensor.clone().detach().requires_grad_(True)
             # PGD loop
             for i in range(iters):
-                response = self.planner.plan(adv_image_prompts, user_question)
+                response = self.planner.plan(adv_last_image, user_question)
 
                 loss = self._compute_attack_loss(response, targeted_plan_result)
                 
@@ -752,10 +757,9 @@ class NaviAgent:
 
                 # Gradient step
                 with torch.no_grad():
-                    adv_image_prompts = [adv_last_image, image_prompt_resized]
-                    adv_image_prompts = adv_image_prompts + alpha * adv_image_prompts.grad.sign()
-                    adv_image_prompts = torch.min(torch.max(adv_image_prompts, obs - epsilon), obs + epsilon)  # clamp
-                    adv_image_prompts = adv_image_prompts.detach().requires_grad_(True)
+                    adv_last_image = adv_last_image + alpha * adv_last_image.grad.sign()
+                    adv_last_image = torch.min(torch.max(adv_last_image, obs - epsilon), obs + epsilon)  # clamp
+                    adv_last_image = adv_last_image.detach().requires_grad_(True)
 
         logs['plan_result'] = plan_result
 
