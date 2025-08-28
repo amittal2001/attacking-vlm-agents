@@ -40,7 +40,6 @@ class Llama3Vision:
             local_files_only=local_files_only,
             # device_map="auto"  # uncomment if you want Transformers to auto-place layers (needs accelerate)
         )
-
         # move to device (if not using device_map)
         if getattr(self.model, "to", None) is not None and self.device != "cpu":
             self.model.to(self.device)
@@ -89,13 +88,20 @@ class Llama3Vision:
                 raise ValueError(f"Unsupported tensor shape {images.shape}, expected [C,H,W] or [1,C,H,W]")
         else:
             raise ValueError("images must be a PIL Image, torch.Tensor, or list of one image.")
-        # Build text prompt with exactly one <image> token
-        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<image>\n" + question
+        # Build text prompt with exactly one <|image|> token
+        prompt = [
+            {"role": "system", "content": system_prompt or "You are a helpful assistant."},
+            {"role": "user", "content": f"<|image|>\n{question}"}
+        ]
+        #prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
+
+
         inputs = self.processor(images=images, text=prompt, return_tensors="pt").to(self.device, self.torch_dtype)
         gen_kwargs = dict(max_new_tokens=max_tokens,
                           do_sample=(temperature > 0),
                           temperature=temperature,
                           top_p=0.95)
-        output = self.model.generate(**inputs, **gen_kwargs)
+        
+        output = self.model(**inputs, **gen_kwargs)
         text = self.processor.decode(output[0], skip_special_tokens=True)
         return text
