@@ -72,33 +72,30 @@ class Llama3Vision:
                        temperature=0.0,
                        only_text=True,
                        format="JPEG") -> str:
-            
-            
-            
-        # convert images to tensor
+        # Always expect a single image
         if isinstance(images, list):
-            images = images [0]
+            if len(images) != 1:
+                raise ValueError(f"Expected a single image, got {len(images)}.")
+            images = images[0]
         if isinstance(images, Image.Image):
             images = T.ToTensor()(images)  # -> [C,H,W]
-            images = images.unsqueeze(0)   # -> [1,C,H,W]    
-            # Ensure batch dimension
-            
-        if images.dim() == 3:   # [C,H,W]
-            images = images.unsqueeze(0)  # -> [1,C,H,W]
-        elif images.dim() != 4:
-            raise ValueError(f"Unsupported tensor shape {images.shape}, expected [C,H,W] or [B,C,H,W]")
-
-        # Build text prompt
+            images = images.unsqueeze(0)   # -> [1,C,H,W]
+        elif isinstance(images, torch.Tensor):
+            if images.dim() == 3:
+                images = images.unsqueeze(0)
+            elif images.dim() == 4 and images.shape[0] != 1:
+                raise ValueError(f"Expected a single image in batch, got batch of {images.shape[0]}.")
+            elif images.dim() != 4:
+                raise ValueError(f"Unsupported tensor shape {images.shape}, expected [C,H,W] or [1,C,H,W]")
+        else:
+            raise ValueError("images must be a PIL Image, torch.Tensor, or list of one image.")
+        # Build text prompt with exactly one <image> token
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<image>\n" + question
-
         inputs = self.processor(images=images, text=prompt, return_tensors="pt").to(self.device, self.torch_dtype)
-
         gen_kwargs = dict(max_new_tokens=max_tokens,
                           do_sample=(temperature > 0),
                           temperature=temperature,
                           top_p=0.95)
-
         output = self.model.generate(**inputs, **gen_kwargs)
-
         text = self.processor.decode(output[0], skip_special_tokens=True)
         return text
