@@ -285,14 +285,6 @@ def test(
                 agent.reset()
                 obs = env.reset(task_config=example)
                 
-                if wandb_run:
-                    if obs == "screen":
-                        image_file = BytesIO(obs['screenshot'])
-                        image = Image.open(image_file)
-                    else:
-                        image = obs['window_image']
-                    wandb_run.log({"original_image": wandb.Image(image)})
-                
                 response, actions, logs, computer_update_args, adv_image_prompts = agent.pgd_attack(
                     instruction,
                     obs,
@@ -302,9 +294,6 @@ def test(
                     iters=args.num_steps,
                     wandb_run=wandb_run
                 )
-                
-                if wandb_run:
-                    wandb_run.log({"adv_image": wandb.Image(adv_image_prompts[0])})
 
                 # Save trajectory as JSONL
                 with open(os.path.join(example_result_dir, "traj.jsonl"), "w") as f:

@@ -2,6 +2,8 @@ import json
 import logging
 import re
 from typing import Dict, List
+
+import wandb
 # from mm_agents.planner.computer import Computer, WindowManager
 from mm_agents.navi.gpt.gpt4v_planner import GPT4V_Planner
 from mm_agents.navi.llama.llama3v_planner import Llama3v_Planner
@@ -743,6 +745,9 @@ class NaviAgent:
             transform = T.ToTensor()  # converts to [0,1] float tensor
             last_image_tensor = transform(last_image.convert("RGB")).unsqueeze(0)  # add batch dim
             adv_last_image = last_image_tensor.clone().detach().requires_grad_(True)
+            if wandb_run:
+                wandb_run.log("original_image", wandb.Image(T.ToPILImage()(last_image_tensor.squeeze().cpu())))
+                wandb_run.log("user_question", user_question)
             # PGD loop
             for i in range(iters):
                 response = self.planner.plan(adv_last_image, user_question)
@@ -750,6 +755,7 @@ class NaviAgent:
                 loss = self._compute_attack_loss(response, targeted_plan_result)
                 
                 if wandb_run:
+                    wandb_run.log({"step": i, "adv_image": wandb.Image(T.ToPILImage()(adv_last_image.squeeze().cpu()))}) 
                     wandb_run.log({"step": i, "loss": loss.item()})
 
                 # Backprop
@@ -761,6 +767,9 @@ class NaviAgent:
                     adv_last_image = torch.min(torch.max(adv_last_image, obs - epsilon), obs + epsilon)  # clamp
                     adv_last_image = adv_last_image.detach().requires_grad_(True)
 
+            if wandb_run:
+                wandb_run.log("final_adv_image", wandb.Image(T.ToPILImage()(adv_last_image.squeeze().cpu())))
+                wandb_run.log("final_response", response)
         logs['plan_result'] = plan_result
 
         # extract the textual memory block

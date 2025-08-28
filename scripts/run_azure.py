@@ -115,12 +115,16 @@ def launch_vm_and_job(  worker_id,
     #### CREATE THE DATA STORE
     datastore = Datastore.get(workspace=ws, datastore_name="workspaceblobstore")
 
-    compute_instance_name = "w" + str(worker_id) + "Exp" + exp_name
+    compute_instance_name = "w" + str(worker_id) + "Exp" + exp_name + "Epsilon" + str(epsilon) + "Alpha" + str(alpha) + "NumSteps" + str(num_steps)
 
     try:
         compute_instance = ml_client.compute.get(compute_instance_name)
         logging.info("Compute instance " + compute_instance_name + " already exists. Skipping creation")
         logging.info(f"Compute instance status: {compute_instance.state}") # Stopped, Starting, Running, Stopping
+        if compute_instance.state in ["CreateFailed"]:
+            logging.error(f"Compute instance {compute_instance_name} is in '{compute_instance.state}' state. Deleting and recreating.")
+            ml_client.compute.begin_delete(compute_instance_name).wait()
+            raise Exception(f"Compute instance {compute_instance_name} was in '{compute_instance.state}' state and has been deleted.")
         if compute_instance.state != "Running":
             ml_client.compute.begin_start(compute_instance_name).wait()
             logging.info(f"Compute instance {compute_instance_name} has been started.")

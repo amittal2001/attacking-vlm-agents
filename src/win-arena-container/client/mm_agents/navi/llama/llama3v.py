@@ -4,6 +4,7 @@ from PIL import Image
 import torch
 from transformers import AutoProcessor, MllamaForConditionalGeneration
 import torchvision.transforms as T
+import logging
 
 class Llama3Vision:
     def __init__(self, model_id: str = "meta-llama/Llama-3.2-11B-Vision-Instruct",
@@ -76,40 +77,41 @@ class Llama3Vision:
             if len(images) != 1:
                 raise ValueError(f"Expected a single image, got {len(images)}.")
             images = images[0]
-        if isinstance(images, Image.Image):
-            images = T.ToTensor()(images)  # -> [C,H,W]
-            images = images.unsqueeze(0)   # -> [1,C,H,W]
-        elif isinstance(images, torch.Tensor):
+        # If tensor, convert to PIL Image
+        if isinstance(images, torch.Tensor):
+            if images.dim() == 4 and images.shape[0] == 1:
+                images = images.squeeze(0)
             if images.dim() == 3:
-                images = images.unsqueeze(0)
-            elif images.dim() == 4 and images.shape[0] != 1:
-                raise ValueError(f"Expected a single image in batch, got batch of {images.shape[0]}.")
-            elif images.dim() != 4:
-                raise ValueError(f"Unsupported tensor shape {images.shape}, expected [C,H,W] or [1,C,H,W]")
-        else:
-            raise ValueError("images must be a PIL Image, torch.Tensor, or list of one image.")
-        # Build text prompt with exactly one <|image|> token
-        #prompt = [
-        #    {"role": "system", "content": system_prompt or "You are a helpful assistant."},
-        #    {"role": "user", "content": f"<|image|>\n{question}"}
-        #]
+                # Clamp and convert to uint8 if needed
+                if images.max() <= 1.0:
+                    images = images.clamp(0, 1)
+                    images = (images * 255).to(torch.uint8)
+                images = T.ToPILImage()(images.cpu())
+            else:
+                raise ValueError("Tensor must be shape [C,H,W] or [1,C,H,W]")
+        if not isinstance(images, Image.Image):
+            raise ValueError("images must be a PIL Image or list of one image.")
+
+        logger = logging.getLogger()
+        logger.info(f"Processing images with prompt: {prompt}")
+        logger.info(f"image type: {type(images)}")
+        logger.info(f"image size: {images.size()}")
+
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
 
-
         inputs = self.processor(images=images, text=prompt, return_tensors="pt").to(self.device, self.torch_dtype)
+        inputs["pixel_values"].requires_grad_()
         gen_kwargs = dict(max_new_tokens=max_tokens,
                           do_sample=(temperature > 0),
                           temperature=temperature,
                           top_p=0.95)
         
         # --- Forward pass (not .generate) ---
+        inputs = {k: v.to(self.device, self.torch_dtype) for k, v in inputs.items()}
+
         outputs = self.model(**inputs)
         logits = outputs.logits  # [batch, seq_len, vocab_size]
 
-        #if return_logits:
-        #    return logits, images  # return logits and image tensor for gradient computation
-
-        # Otherwise, convert logits to predicted tokens (argmax)
         pred_ids = logits.argmax(dim=-1)
         text = self.processor.decode(pred_ids[0], skip_special_tokens=True)
         return text
