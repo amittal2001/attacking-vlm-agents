@@ -115,7 +115,7 @@ def launch_vm_and_job(  worker_id,
     #### CREATE THE DATA STORE
     datastore = Datastore.get(workspace=ws, datastore_name="workspaceblobstore")
 
-    compute_instance_name = f"w{worker_id}Exp{exp_name}E{epsilon:.2e}A{alpha:.2e}S{num_steps}"
+    compute_instance_name = f"w{worker_id}Exp{exp_name}"
 
     try:
         compute_instance = ml_client.compute.get(compute_instance_name)
