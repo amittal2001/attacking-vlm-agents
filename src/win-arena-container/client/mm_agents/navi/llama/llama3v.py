@@ -106,8 +106,8 @@ class Llama3Vision:
         outputs = self.model(**inputs)
         logits = outputs.logits  # [batch, seq_len, vocab_size]
 
-        if return_logits:
-            return logits, images  # return logits and image tensor for gradient computation
+        #if return_logits:
+        #    return logits, images  # return logits and image tensor for gradient computation
 
         # Otherwise, convert logits to predicted tokens (argmax)
         pred_ids = logits.argmax(dim=-1)
