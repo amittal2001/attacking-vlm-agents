@@ -181,7 +181,7 @@ def test(
     wandb.login(key=args.wandb_key)
     wandb_run = wandb.init(
         project="mip-generator-attack",   
-        name="experiment-1",         
+        name=f"PGDAttack-Epsilon{args.epsilon}-Alpha{args.alpha}-Steps{args.num_steps}-TargetAction{args.target_action}",         
         config={
             "targeted_plan_result":args.target_action,
             "epsilon":args.epsilon,
