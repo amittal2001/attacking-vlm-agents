@@ -89,11 +89,11 @@ class Llama3Vision:
         else:
             raise ValueError("images must be a PIL Image, torch.Tensor, or list of one image.")
         # Build text prompt with exactly one <|image|> token
-        prompt = [
-            {"role": "system", "content": system_prompt or "You are a helpful assistant."},
-            {"role": "user", "content": f"<|image|>\n{question}"}
-        ]
-        #prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
+        #prompt = [
+        #    {"role": "system", "content": system_prompt or "You are a helpful assistant."},
+        #    {"role": "user", "content": f"<|image|>\n{question}"}
+        #]
+        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
 
 
         inputs = self.processor(images=images, text=prompt, return_tensors="pt").to(self.device, self.torch_dtype)
@@ -102,6 +102,14 @@ class Llama3Vision:
                           temperature=temperature,
                           top_p=0.95)
         
-        output = self.model(**inputs, **gen_kwargs)
-        text = self.processor.decode(output[0], skip_special_tokens=True)
+        # --- Forward pass (not .generate) ---
+        outputs = self.model(**inputs)
+        logits = outputs.logits  # [batch, seq_len, vocab_size]
+
+        if return_logits:
+            return logits, images  # return logits and image tensor for gradient computation
+
+        # Otherwise, convert logits to predicted tokens (argmax)
+        pred_ids = logits.argmax(dim=-1)
+        text = self.processor.decode(pred_ids[0], skip_special_tokens=True)
         return text
