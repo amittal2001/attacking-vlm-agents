@@ -95,7 +95,7 @@ class Llama3Vision:
         logger = logging.getLogger()
         logger.info(f"Processing images with prompt: {prompt}")
         logger.info(f"image type: {type(images)}")
-        logger.info(f"image size: {images.size()}")
+        logger.info(f"image size: {images.size}")
 
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
 
