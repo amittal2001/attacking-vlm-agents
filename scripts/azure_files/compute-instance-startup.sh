@@ -1,15 +1,21 @@
 #!/bin/bash
+set -eux
+export DEBIAN_FRONTEND=noninteractive
 
-echo "Initializing Compute VM at startup..."
+# Logging
+exec > >(tee -i /var/log/startup-script.log)
+exec 2>&1
 
-# Install dos2unix
-sudo apt-get install -y dos2unix
+# Fix duplicate apt sources
+sudo rm -f /etc/apt/sources.list.d/archive_uri-https_packages_microsoft_com_ubuntu_22_04_prod-jammy.list
+sudo rm -f /etc/apt/sources.list.d/azure-cli.sources
 
-# Stop dnsmasq running on port 53
-sudo systemctl stop systemd-resolved
+sudo apt-get update -y
+sudo apt-get install -y --no-install-recommends dos2unix
 
-# Stop DNS service on port 53
-sudo systemctl stop named.service
+# Only stop named.service if it exists
+if systemctl list-unit-files | grep -q named.service; then
+    sudo systemctl stop named.service
+fi
 
-# Stop nginx running on port 80
-sudo service nginx stop
+echo "Startup script finished successfully.
