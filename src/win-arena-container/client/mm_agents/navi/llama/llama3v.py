@@ -92,12 +92,12 @@ class Llama3Vision:
         if not isinstance(images, Image.Image):
             raise ValueError("images must be a PIL Image or list of one image.")
 
+        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
+        
         logger = logging.getLogger()
         logger.info(f"Processing images with prompt: {prompt}")
         logger.info(f"image type: {type(images)}")
         logger.info(f"image size: {images.size}")
-
-        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
 
         inputs = self.processor(images=images, text=prompt, return_tensors="pt").to(self.device, self.torch_dtype)
         inputs["pixel_values"].requires_grad_()

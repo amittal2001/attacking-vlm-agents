@@ -747,7 +747,12 @@ class NaviAgent:
             adv_last_image = last_image_tensor.clone().detach().requires_grad_(True)
             if wandb_run:
                 wandb_run.log({"original_image": wandb.Image(T.ToPILImage()(last_image_tensor.squeeze().cpu()))})
-                wandb_run.log({"user_question": user_question})
+                table = wandb.Table(columns=["user_question"])
+                table.add_data(user_question)
+                wandb_run.log({"user_question_table": table})
+                columns = ["step", "response"]
+                data = []
+
             # PGD loop
             for i in range(iters):
                 response = self.planner.plan(adv_last_image, user_question)
@@ -757,6 +762,7 @@ class NaviAgent:
                 if wandb_run:
                     wandb_run.log({"step": i, "adv_image": wandb.Image(T.ToPILImage()(adv_last_image.squeeze().cpu()))})
                     wandb_run.log({"step": i, "loss": loss.item()})
+                    data.append([i, response])
 
                 # Backprop
                 loss.backward()
@@ -768,8 +774,14 @@ class NaviAgent:
                     adv_last_image = adv_last_image.detach().requires_grad_(True)
 
             if wandb_run:
+                # Create the table
+                response_table = wandb.Table(columns=columns, data=data)
+                wandb.log({"model_responses": response_table})
                 wandb_run.log({"final_adv_image": wandb.Image(T.ToPILImage()(adv_last_image.squeeze().cpu()))})
-                wandb_run.log({"final_response": response})
+                
+                table = wandb.Table(columns=["final_response"])
+                table.add_data(response)
+                wandb_run.log({"final_response_table": table})
         logs['plan_result'] = plan_result
 
         # extract the textual memory block
