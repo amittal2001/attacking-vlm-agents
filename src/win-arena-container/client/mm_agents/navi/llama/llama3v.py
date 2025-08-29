@@ -1,3 +1,4 @@
+
 import base64, io, requests
 from typing import Union, List, Optional
 from PIL import Image
@@ -5,6 +6,14 @@ import torch
 from transformers import AutoProcessor, MllamaForConditionalGeneration
 import torchvision.transforms as T
 import logging
+import sys
+
+# Configure logging to output to stdout
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s %(message)s',
+    stream=sys.stdout
+)
 
 class Llama3Vision:
     def __init__(self, model_id: str = "meta-llama/Llama-3.2-11B-Vision-Instruct",
@@ -93,22 +102,30 @@ class Llama3Vision:
             raise ValueError("images must be a PIL Image or list of one image.")
 
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
-        
+
         logger = logging.getLogger()
         logger.info(f"Processing images with prompt: {prompt}")
         logger.info(f"image type: {type(images)}")
         logger.info(f"image size: {images.size}")
 
-        inputs = self.processor(images=images, text=prompt, return_tensors="pt").to(self.device, self.torch_dtype)
+        inputs = self.processor(images=images, text=prompt, return_tensors="pt")
+        for k, v in inputs.items():
+            if torch.is_floating_point(v):
+                inputs[k] = v.to(self.device, dtype=self.torch_dtype)
+            else:
+                inputs[k] = v.to(self.device)
+
         inputs["pixel_values"].requires_grad_()
         gen_kwargs = dict(max_new_tokens=max_tokens,
                           do_sample=(temperature > 0),
                           temperature=temperature,
                           top_p=0.95)
-        
-        # --- Forward pass (not .generate) ---
-        inputs = {k: v.to(self.device, self.torch_dtype) for k, v in inputs.items()}
 
+        # Ensure aspect_ratio_ids is long if present
+        if "aspect_ratio_ids" in inputs:
+            inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
+
+        # Forward pass
         outputs = self.model(**inputs)
         logits = outputs.logits  # [batch, seq_len, vocab_size]
 
