@@ -784,6 +784,7 @@ class NaviAgent:
                 table = wandb.Table(columns=["final_response"])
                 table.add_data(response)
                 wandb_run.log({"final_response_table": table})
+                
         logs['plan_result'] = plan_result
 
         # extract the textual memory block
