@@ -108,7 +108,7 @@ def launch_vm_and_job(  worker_id,
     #### CREATE THE STARTUP SCRIPT
     startup_script_ref = ScriptReference(
         path=ci_startup_script_path,
-        timeout_minutes=30
+        timeout_minutes=20
     )
     setup_scripts = SetupScripts(startup_script=startup_script_ref)
 
