@@ -1,38 +1,49 @@
 #!/bin/bash
-set -euo pipefail
+set -eux  # Exit immediately if a command fails, print each command
+
+# Prevent interactive prompts during apt installs
 export DEBIAN_FRONTEND=noninteractive
 
-# Redirect logs
+# Logging for debugging
 exec > >(tee -i /var/log/startup-script.log)
 exec 2>&1
 
-echo "[INFO] Cleaning up old sources..."
-sudo rm -f /etc/apt/sources.list.d/archive_uri-https_packages_microsoft_com_ubuntu_22_04_prod-jammy.list
-sudo rm -f /etc/apt/sources.list.d/azure-cli.sources
+echo "===== Azure ML Compute Instance Startup Script ====="
 
-echo "[INFO] Fixing TensorFlow Serving repo key..."
-# Remove old key if exists
-sudo rm -f /usr/share/keyrings/tf-serving.gpg
-# Import new key
-curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
-    sudo gpg --dearmor -o /usr/share/keyrings/tf-serving.gpg
+# --- Step 1: Fix duplicate apt sources that cause warnings ---
+echo "Cleaning up duplicate apt sources..."
+sudo rm -f /etc/apt/sources.list.d/archive_uri-https_packages_microsoft_com_ubuntu_22_04_prod-jammy.list || true
+sudo rm -f /etc/apt/sources.list.d/azure-cli.sources || true
 
-# Ensure correct repo list
-cat <<EOF | sudo tee /etc/apt/sources.list.d/tensorflow-serving.list
-deb [signed-by=/usr/share/keyrings/tf-serving.gpg] https://storage.googleapis.com/tensorflow-serving-apt stable tensorflow-model-server tensorflow-model-server-universal
-EOF
+# --- Step 2: Update and upgrade system packages ---
+echo "Updating apt package lists..."
+sudo apt-get update -y
+sudo apt-get upgrade -y || true  # don't fail if upgrade is partially blocked
 
-echo "[INFO] Running apt-get update..."
-sudo apt-get update -y || true   # allow non-critical repo failures
-
-echo "[INFO] Installing required packages..."
+# --- Step 3: Install required packages ---
+echo "Installing required packages..."
 sudo apt-get install -y --no-install-recommends dos2unix
 
-echo "[INFO] Trying to stop named.service if present..."
+# --- Step 4: Stop conflicting services if they exist ---
+echo "Checking for named.service..."
 if systemctl list-unit-files | grep -q named.service; then
-    sudo systemctl stop named.service || true
+    sudo systemctl stop named || true
+    echo "named.service stopped."
 else
-    echo "[INFO] named.service not found, skipping."
+    echo "named.service not found, skipping."
 fi
 
-echo "[INFO] Startup script completed successfully."
+echo "Checking for nginx.service..."
+if systemctl list-unit-files | grep -q nginx.service; then
+    sudo systemctl stop nginx || true
+    echo "nginx.service stopped."
+else
+    echo "nginx.service not found, skipping."
+fi
+
+# --- Step 5: Final cleanup ---
+echo "Cleaning up..."
+sudo apt-get autoremove -y || true
+sudo apt-get clean
+
+echo "===== Startup script finished successfully ====="
