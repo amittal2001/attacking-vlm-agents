@@ -21,8 +21,8 @@ class Llama3v_Planner:
         self.system_prompt =  planner_messages.planning_system_message
 
     def pgd_plan(self, images, user_query, targeted_plan_result):  
-        loss, response = self.llama.pgd_process_images(self.system_prompt, user_query, images, targeted_plan_result, max_tokens=4096, temperature=self.temperature, only_text=True)
-        return loss, response
+        loss, response, grad = self.llama.pgd_process_images(self.system_prompt, user_query, images, targeted_plan_result, max_tokens=4096, temperature=self.temperature, only_text=True)
+        return loss, response, grad 
 
     def describe_elements(self, screenshot, crops, descriptions=None) -> str:
         n = len(crops)

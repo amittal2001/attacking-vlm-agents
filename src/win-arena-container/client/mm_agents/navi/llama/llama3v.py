@@ -108,9 +108,6 @@ class Llama3Vision:
 
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
 
-        logger.info(f"Processing images with prompt: {prompt}")
-        logger.info(f"image type: {type(images)}")
-        logger.info(f"image size: {images.size}")
         logger.info(f"Device: {self.device}")
 
         inputs = self.processor(images=images, text=prompt, return_tensors="pt")
@@ -120,7 +117,7 @@ class Llama3Vision:
             else:
                 inputs[k] = v.to(self.device)
 
-        inputs["pixel_values"].requires_grad_()
+        inputs["pixel_values"].requires_grad_(requires_grad=True)
         gen_kwargs = dict(max_new_tokens=max_tokens,
                           do_sample=(temperature > 0),
                           temperature=temperature,
@@ -131,16 +128,11 @@ class Llama3Vision:
             inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
 
         # Forward pass
-        logger.debug("Calling model forward...")
         outputs = self.model(**inputs)
         logits = outputs.logits  # [batch, seq_len, vocab_size]
-        logger.debug(f"Logits shape: {logits.shape}")
 
         pred_ids = logits.argmax(dim=-1)
-        logger.debug(f"Predicted token ids: {pred_ids}")
         text = self.processor.decode(pred_ids[0], skip_special_tokens=True)
-        logger.debug(f"Decoded text: {text}")
-
         # Compute loss between model output and targeted_plan_result
         # Tokenize the target string
         target_tokens = self.processor.tokenizer(
@@ -161,5 +153,8 @@ class Llama3Vision:
 
         # CrossEntropyLoss expects input [N, C] and target [N] (class indices)
         loss = self.loss_fn(logits_for_loss, targets_for_loss)
+        loss.backward()
 
-        return loss, text
+        grad=inputs["pixel_values"].grad.mean(dim=2).squeeze().sign()
+        
+        return loss.item(), text, grad

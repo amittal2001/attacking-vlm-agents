@@ -728,7 +728,7 @@ class NaviAgent:
 
             # If last_image is a PIL Image, convert it to tensor
             transform = T.ToTensor()  # converts to [0,1] float tensor
-            last_image_tensor = transform(last_image.convert("RGB")).unsqueeze(0)  # add batch dim
+            last_image_tensor = transform(last_image.resize(560, 560).convert("RGB")).unsqueeze(0)  # add batch dim
             adv_last_image = last_image_tensor.clone().detach().requires_grad_(True)
             if wandb_run:
                 wandb_run.log({"original_image": wandb.Image(T.ToPILImage()(last_image_tensor.squeeze().cpu()))})
@@ -742,30 +742,26 @@ class NaviAgent:
 
             # PGD loop
             for i in range(iters):
-                loss, response = self.planner.pgd_plan(adv_last_image, user_question, targeted_plan_result)
+                loss, response, grad = self.planner.pgd_plan(adv_last_image, user_question, targeted_plan_result)
                 
                 if wandb_run:
-                    wandb_run.log({"step": i, "adv_image": wandb.Image(T.ToPILImage()(adv_last_image.squeeze().cpu()))})
-                    wandb_run.log({"step": i, "loss": loss.item()})
+                    wandb_run.log({"step": i, "adv_image": wandb.Image(T.ToPILImage()(adv_last_image.clone().detach().squeeze().cpu()))})
+                    wandb_run.log({"step": i, "loss": loss})
                     data.append([i, response])
 
                 if response == targeted_plan_result:
                     break
 
-                # Backprop
-                loss.backward()
-
                 # Gradient step
                 with torch.no_grad():
-                    adv_last_image = adv_last_image - alpha * adv_last_image.grad.sign()
-                    adv_last_image = torch.min(torch.max(adv_last_image, last_image_tensor - epsilon), last_image_tensor + epsilon)  # clamp
-                    adv_last_image = adv_last_image.detach().requires_grad_(True)
+                    adv_last_image.data = adv_last_image.data - alpha * grad.cpu()
+                    adv_last_image.data = torch.min(torch.max(adv_last_image.data, last_image_tensor.data - epsilon), last_image_tensor.data + epsilon)  # clamp
 
             if wandb_run:
                 response_table = wandb.Table(columns=columns, data=data)
                 wandb.log({"model_responses": response_table})
 
-                wandb_run.log({"final_adv_image": wandb.Image(T.ToPILImage()(adv_last_image.squeeze().cpu()))})
+                wandb_run.log({"final_adv_image": wandb.Image(T.ToPILImage()(adv_last_image.clone().detach().squeeze().cpu()))})
 
                 table = wandb.Table(columns=["final_response"])
                 table.add_data(response)
