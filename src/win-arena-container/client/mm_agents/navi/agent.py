@@ -26,21 +26,6 @@ def prev_actions_to_string(prev_actions, n_prev=3):
         result += f"Screen is currently at time step T. Below is the action executed at time step T-{i}: \n{action}\n\n"  
     return result 
 
-from sentence_transformers import SentenceTransformer
-import torch
-
-# Load a sentence transformer model
-emb_model = SentenceTransformer('all-MiniLM-L6-v2')
-def embed_fn(text):
-    """
-    Convert text string to a torch tensor embedding.
-    """
-    # model.encode returns numpy array, convert to torch tensor
-    emb = emb_model.encode(text, convert_to_tensor=True)
-    emb = emb.float()  # ensure float32
-    emb.requires_grad_(True)  # necessary for PGD
-    return emb 
-
 from PIL import Image
 
 def resize_image_openai(image):
@@ -757,9 +742,7 @@ class NaviAgent:
 
             # PGD loop
             for i in range(iters):
-                response = self.planner.plan(adv_last_image, user_question)
-
-                loss = self._compute_attack_loss(response, targeted_plan_result)
+                loss, response = self.planner.pgd_plan(adv_last_image, user_question, targeted_plan_result)
                 
                 if wandb_run:
                     wandb_run.log({"step": i, "adv_image": wandb.Image(T.ToPILImage()(adv_last_image.squeeze().cpu()))})
@@ -784,7 +767,7 @@ class NaviAgent:
                 table = wandb.Table(columns=["final_response"])
                 table.add_data(response)
                 wandb_run.log({"final_response_table": table})
-                
+
         logs['plan_result'] = plan_result
 
         # extract the textual memory block
@@ -835,32 +818,6 @@ class NaviAgent:
 
         return response, actions, logs, computer_update_args, adv_last_image
     
-
-
-    
-    def _compute_attack_loss(self, response_text, target_text, embed_fn=embed_fn):
-        """
-        Compute differentiable loss between two texts.
-
-        Args:
-            response_text: string produced by the agent
-            target_text: target string you want PGD to approach
-            embed_fn: a callable that maps string -> torch tensor embedding
-
-        Returns:
-            torch scalar loss
-        """
-        import torch
-
-        # Convert texts to embeddings
-        resp_emb = embed_fn(response_text)  # shape: [D], requires_grad=True
-        target_emb = embed_fn(target_text)  # shape: [D]
-
-        # Example: maximize similarity (negative cosine distance)
-        cos_sim = torch.cosine_similarity(resp_emb, target_emb, dim=0)
-        loss = 1 - cos_sim  # smaller loss = closer to target
-
-        return loss
 
     def reset(self):
         self.memory_block_text = self.memory_block_text_empty

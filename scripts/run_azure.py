@@ -332,14 +332,14 @@ def launch_batch(experiments):
 
         logging.info(f"Launching experiment: {exp_name}")
         # save start timestamp
-        config['_start_time'] = config.get('_start_time', time.strftime('%Y-%m-%d %H:%M:%S'))
-        save_exps(experiments)
+        #config['_start_time'] = config.get('_start_time', time.strftime('%Y-%m-%d %H:%M:%S'))
+        #save_exps(experiments)
         # launch exp
         launch_experiment(config)
         # save end timestamp
-        config['_stop_time'] = time.strftime('%Y-%m-%d %H:%M:%S')
-        config['_done'] = True
-        save_exps(experiments)
+        #config['_stop_time'] = time.strftime('%Y-%m-%d %H:%M:%S')
+        #config['_done'] = True
+        #save_exps(experiments)
 
 def save_exps(experiments):
     if experiments_json:

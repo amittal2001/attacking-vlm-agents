@@ -10,7 +10,7 @@ import sys
 
 # Configure logging to output to stdout
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='[%(asctime)s] %(levelname)s %(message)s',
     stream=sys.stdout
 )
@@ -50,9 +50,12 @@ class Llama3Vision:
             local_files_only=local_files_only,
             # device_map="auto"  # uncomment if you want Transformers to auto-place layers (needs accelerate)
         )
+
         # move to device (if not using device_map)
         if getattr(self.model, "to", None) is not None and self.device != "cpu":
             self.model.to(self.device)
+
+        self.loss_fn = torch.nn.CrossEntropyLoss()
 
     # --- helpers to encode or wrap image ---
     def encode_image(self, image: Union[str, Image.Image], format="JPEG") -> str:
@@ -73,14 +76,15 @@ class Llama3Vision:
         return {"type": "image_url", "image_url": {"url": f"data:image/{mime};base64,{base64_image}"}}
 
     # --- main multimodal call ---
-    def process_images(self,
+    def pgd_process_images(self,
                        system_prompt: str,
                        question: str,
                        images: Union[torch.Tensor, Image.Image, List[Image.Image]],
+                       targeted_plan_result: str,
                        max_tokens=512,
                        temperature=0.0,
                        only_text=True,
-                       format="JPEG") -> str:
+                       format="JPEG") -> tuple:
         # Always expect a single image
         if isinstance(images, list):
             if len(images) != 1:
@@ -126,9 +130,35 @@ class Llama3Vision:
             inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
 
         # Forward pass
+        logger.debug("Calling model forward...")
         outputs = self.model(**inputs)
         logits = outputs.logits  # [batch, seq_len, vocab_size]
+        logger.debug(f"Logits shape: {logits.shape}")
 
         pred_ids = logits.argmax(dim=-1)
+        logger.debug(f"Predicted token ids: {pred_ids}")
         text = self.processor.decode(pred_ids[0], skip_special_tokens=True)
-        return text
+        logger.debug(f"Decoded text: {text}")
+
+        # Compute loss between model output and targeted_plan_result
+        # Tokenize the target string
+        target_tokens = self.processor.tokenizer(
+            targeted_plan_result,
+            return_tensors="pt",
+            add_special_tokens=False
+        )["input_ids"].to(self.device)
+
+        # Align target length with logits sequence length
+        # logits: [batch, seq_len, vocab_size], target_tokens: [1, tgt_len]
+        # We'll use the first batch (batch=0)
+        seq_len = logits.shape[1]
+        tgt_len = target_tokens.shape[1]
+        min_len = min(seq_len, tgt_len)
+        # Use only the overlapping part for loss
+        logits_for_loss = logits[0, :min_len, :]
+        targets_for_loss = target_tokens[0, :min_len]
+
+        # CrossEntropyLoss expects input [N, C] and target [N] (class indices)
+        loss = self.loss_fn(logits_for_loss, targets_for_loss)
+
+        return loss, text
