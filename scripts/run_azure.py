@@ -134,6 +134,8 @@ def launch_vm_and_job(  worker_id,
         # start the compute instance, if it doesn't exist
         logging.info(f"Creating compute instance {compute_instance_name}...")
         idle_time_before_shutdown_minutes=60
+        # size="Standard_D8_v3"
+        size="Standard_NC4as_T4_v3"
 
         if use_managed_identity:
             identity_config = ManagedIdentityConfiguration(
@@ -149,7 +151,7 @@ def launch_vm_and_job(  worker_id,
             )
 
             compute_instance = ComputeInstance(name=compute_instance_name, 
-                                    size="Standard_D8_v3", 
+                                    size=size, 
                                     setup_scripts=setup_scripts,
                                     idle_time_before_shutdown_minutes=idle_time_before_shutdown_minutes,
                                     ssh_public_access_enabled=True,
@@ -157,7 +159,7 @@ def launch_vm_and_job(  worker_id,
                                     )
         else:
             compute_instance = ComputeInstance(name=compute_instance_name, 
-                                    size="Standard_D8_v3", 
+                                    size=size, 
                                     setup_scripts=setup_scripts,
                                     idle_time_before_shutdown_minutes=idle_time_before_shutdown_minutes,
                                     ssh_public_access_enabled=True

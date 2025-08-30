@@ -755,7 +755,7 @@ class NaviAgent:
                 # Gradient step
                 with torch.no_grad():
                     adv_last_image = adv_last_image + alpha * adv_last_image.grad.sign()
-                    adv_last_image = torch.min(torch.max(adv_last_image, obs - epsilon), obs + epsilon)  # clamp
+                    adv_last_image = torch.min(torch.max(adv_last_image, last_image_tensor - epsilon), last_image_tensor + epsilon)  # clamp
                     adv_last_image = adv_last_image.detach().requires_grad_(True)
 
             if wandb_run:

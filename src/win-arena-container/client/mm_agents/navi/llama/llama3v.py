@@ -8,13 +8,14 @@ import torchvision.transforms as T
 import logging
 import sys
 
+
 # Configure logging to output to stdout
 logging.basicConfig(
     level=logging.DEBUG,
     format='[%(asctime)s] %(levelname)s %(message)s',
     stream=sys.stdout
 )
-
+logger = logging.getLogger()
 class Llama3Vision:
     def __init__(self, model_id: str = "meta-llama/Llama-3.2-11B-Vision-Instruct",
                  device: Optional[str] = None,
@@ -36,12 +37,12 @@ class Llama3Vision:
             self.torch_dtype = torch_dtype
 
         # Load processor (handles image + text preproc)
-        print(f"Loading processor from {model_id} (local_files_only={local_files_only})")
+        logger.info(f"Loading processor from {model_id} (local_files_only={local_files_only})")
         self.processor = AutoProcessor.from_pretrained(model_id, local_files_only=local_files_only)
 
         # Load model (use low_cpu_mem_usage and dtype hints)
         # If you plan to use a quantized checkpoint, set use_quantized=True and ensure repository supports that.
-        print(f"Loading model {model_id} on {self.device} dtype={self.torch_dtype}")
+        logger.info(f"Loading model {model_id} on {self.device} dtype={self.torch_dtype}")
         # NOTE: when using large models on CPU you might need to set device_map / offload to disk (use accelerate or bitsandbytes)
         self.model = MllamaForConditionalGeneration.from_pretrained(
             model_id,
@@ -107,10 +108,10 @@ class Llama3Vision:
 
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
 
-        logger = logging.getLogger()
         logger.info(f"Processing images with prompt: {prompt}")
         logger.info(f"image type: {type(images)}")
         logger.info(f"image size: {images.size}")
+        logger.info(f"Device: {self.device}")
 
         inputs = self.processor(images=images, text=prompt, return_tensors="pt")
         for k, v in inputs.items():
