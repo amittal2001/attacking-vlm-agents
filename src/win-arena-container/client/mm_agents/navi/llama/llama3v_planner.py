@@ -22,7 +22,15 @@ class Llama3v_Planner:
 
     def pgd_plan(self, images, user_query, targeted_plan_result):  
         loss, response, grad = self.llama.pgd_process_images(self.system_prompt, user_query, images, targeted_plan_result, max_tokens=4096, temperature=self.temperature, only_text=True)
-        return loss, response, grad 
+        return loss, response, grad
+
+    def plan(self, images, user_query):
+        response = self.llama.process_images(self.system_prompt, user_query, images, max_tokens=4096, temperature=self.temperature, only_text=True)
+        return response
+    
+    def rand_smooth_plan(self, images, user_query, N=10, sigma=0.1):
+        response = self.llama.process_images_rand_smooth(self.system_prompt, user_query, images, max_tokens=4096, temperature=self.temperature, only_text=True, N=N, sigma=sigma)
+        return response
 
     def describe_elements(self, screenshot, crops, descriptions=None) -> str:
         n = len(crops)
@@ -33,7 +41,7 @@ class Llama3v_Planner:
         print(system_prompt)
         print(user_query)
 
-        r = self.gpt4v.process_images(system_prompt, user_query, crops+[screenshot], max_tokens=4096, temperature=0.0, only_text=True)
+        r = self.llama.process_images(system_prompt, user_query, crops+[screenshot], max_tokens=4096, temperature=0.0, only_text=True)
 
         # display(Image.open(screenshot_tagged))
         print(r)

@@ -13,6 +13,8 @@
     "epsilon": 0.03,
     "alpha": 0.01,
     "num_steps": 1,
+    "N": 10,
+    "sigma": 0.1,
     "wandb_key": "905e6d9ca6ee9a10c60ee894c70083c76eb8be6a",
     "hugginface_key": "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",
     "target_action": "yes",

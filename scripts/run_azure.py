@@ -63,6 +63,8 @@ def load_args_as_dict():
     parser.add_argument('--epsilon', default=0.03, help='PGD epsilon') 
     parser.add_argument('--alpha', default=0.01, help='PGD alpha') 
     parser.add_argument('--num_steps', default=40, help='PGD steps to run') 
+    parser.add_argument('--N', default=10, help='Random smooth steps') 
+    parser.add_argument('--sigma', default=0.1, help='Random smooth sigma') 
     parser.add_argument('--target_action', default='yes', help='PGD target output')
     parser.add_argument('--wandb_key', default='', help='wandb key')
     parser.add_argument('--hugginface_key', default='', help='hugginface key')
@@ -84,9 +86,11 @@ def launch_vm_and_job(  worker_id,
                         json_name: str,
                         model_name: str,
                         run_mode: str,
-                        epsilon: str,
-                        alpha: str,
-                        num_steps: str,
+                        epsilon: float,
+                        alpha: float,
+                        num_steps: int,
+                        N: int,
+                        sigma: float,
                         target_action: str,
                         wandb_key: str,
                         hugginface_key: str,
@@ -134,8 +138,9 @@ def launch_vm_and_job(  worker_id,
         # start the compute instance, if it doesn't exist
         logging.info(f"Creating compute instance {compute_instance_name}...")
         idle_time_before_shutdown_minutes=60
-        # size="Standard_D8_v3"
-        size="Standard_NC4as_T4_v3"
+        size="Standard_D8_v3"
+        # size="Standard_NC4as_T4_v3"
+        # size="Standard_NC6s_v3"
 
         if use_managed_identity:
             identity_config = ManagedIdentityConfiguration(
@@ -202,6 +207,8 @@ def launch_vm_and_job(  worker_id,
         "epsilon": epsilon,
         "alpha": alpha,
         "num_steps": num_steps,
+        "N": N,
+        "sigma": sigma,
         "target_action": target_action,
         "wandb_key": wandb_key,
         "hugginface_key": hugginface_key,
@@ -213,7 +220,7 @@ def launch_vm_and_job(  worker_id,
 
     src = ScriptRunConfig(source_directory="./azure_files",
                         script='run_entry.py',
-                        arguments=[input, output, exp_name, num_workers, worker_id, agent, json_name, model_name, run_mode, epsilon, alpha, num_steps, target_action, wandb_key, hugginface_key, som_origin, a11y_backend],
+                        arguments=[input, output, exp_name, num_workers, worker_id, agent, json_name, model_name, run_mode, epsilon, alpha, num_steps, N, sigma, target_action, wandb_key, hugginface_key, som_origin, a11y_backend],
                         run_config=run_config)
 
     experiment = Experiment(workspace=ws, name=exp_name)  
@@ -307,8 +314,8 @@ def launch_experiment(config):
     for i in range(config['num_workers']):
         p = Process(target=launch_vm_and_job, args=(i, config['exp_name'], docker_config, config['datastore_input_path'], 
             config['num_workers'], config['agent'], azure_config, config['docker_img_name'], config['ci_startup_script_path'],
-            config['use_managed_identity'], config['json_name'], config['model_name'], config['run_mode'], config.get('epsilon',""),
-            config.get('alpha',""), config.get('num_steps',""), config.get('target_action',""), config.get('wandb_key',""), config.get('hugginface_key',""), config['som_origin'], config['a11y_backend']))
+            config['use_managed_identity'], config['json_name'], config['model_name'], config['run_mode'], config.get('epsilon', 0.0),
+            config.get('alpha', 0.0), config.get('num_steps', 1), config.get('N', 1), config.get('sigma', 0.0), config.get('target_action',""), config.get('wandb_key',""), config.get('hugginface_key',""), config['som_origin'], config['a11y_backend']))
         experiments.append(p)
         p.start()
 
