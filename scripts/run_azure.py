@@ -25,6 +25,13 @@ from azureml.core.environment import Environment, DockerSection
 from azureml.data.dataset_consumption_config import DatasetConsumptionConfig
 from azureml.data import OutputFileDatasetConfig
 
+import asyncio
+import time
+from azure.ai.ml import MLClient
+from azure.ai.ml.entities import ComputeInstance
+from azure.identity import DefaultAzureCredential
+from azure.core.exceptions import HttpResponseError
+
 
 
 
@@ -119,58 +126,100 @@ def launch_vm_and_job(  worker_id,
     #### CREATE THE DATA STORE
     datastore = Datastore.get(workspace=ws, datastore_name="workspaceblobstore")
 
-    compute_instance_name = f"w{worker_id}Exp{exp_name}"
+    async def create_with_timeout(compute_instance, compute_instance_name, timeout_minutes: int = 16, poll_interval: int = 15):
+        start_time = time.time()
 
-    try:
-        compute_instance = ml_client.compute.get(compute_instance_name)
-        logging.info("Compute instance " + compute_instance_name + " already exists. Skipping creation")
-        logging.info(f"Compute instance status: {compute_instance.state}") # Stopped, Starting, Running, Stopping
-        if compute_instance.state in ["CreateFailed"]:
-            logging.error(f"Compute instance {compute_instance_name} is in '{compute_instance.state}' state. Deleting and recreating.")
-            ml_client.compute.begin_delete(compute_instance_name).wait()
-            raise Exception(f"Compute instance {compute_instance_name} was in '{compute_instance.state}' state and has been deleted.")
-        if compute_instance.state != "Running":
-            ml_client.compute.begin_start(compute_instance_name).wait()
-            logging.info(f"Compute instance {compute_instance_name} has been started.")
-        else:
-            logging.info(f"Compute instance {compute_instance_name} is already {compute_instance.state}.")
-    except:
-        # start the compute instance, if it doesn't exist
-        logging.info(f"Creating compute instance {compute_instance_name}...")
-        idle_time_before_shutdown_minutes=60
-        size="Standard_D8_v3"
-        # size="Standard_NC4as_T4_v3"
-        # size="Standard_NC6s_v3"
+        # Kick off creation (non-blocking)
+        ml_client.compute.begin_create_or_update(compute_instance)
 
-        if use_managed_identity:
-            identity_config = ManagedIdentityConfiguration(
-                client_id=azure_config['AZURE_MANAGED_IDENTITY_CLIENT_ID'],
-                resource_id="subscriptions/" + azure_config['AZURE_SUBSCRIPTION_ID'] + "/resourceGroups/" + azure_config['AZURE_ML_RESOURCE_GROUP'] + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/" + azure_config['AZURE_ML_USER_ASSIGNED_IDENTITY'],
-                object_id=azure_config['AZURE_MANAGED_IDENTITY_OBJECT_ID'],
-                principal_id=azure_config['AZURE_MANAGED_IDENTITY_PRINCIPAL_ID'],
-            )
+        while True:
+            elapsed = (time.time() - start_time) / 60
+            if elapsed > timeout_minutes:
+                try:
+                    ml_client.compute.begin_delete(name=compute_instance_name)
+                    raise Exception(f"Compute instance creation timed out after {timeout_minutes} minutes.")
+                except HttpResponseError as e:
+                    raise
 
-            identity = IdentityConfiguration(
-                type="UserAssigned",
-                user_assigned_identities=[identity_config]
-            )
+            # Check provisioning state
+            compute = ml_client.compute.get(name=compute_instance_name)
+            state = compute.provisioning_state
 
-            compute_instance = ComputeInstance(name=compute_instance_name, 
-                                    size=size, 
-                                    setup_scripts=setup_scripts,
-                                    idle_time_before_shutdown_minutes=idle_time_before_shutdown_minutes,
-                                    ssh_public_access_enabled=True,
-                                    identity=identity
-                                    )
-        else:
-            compute_instance = ComputeInstance(name=compute_instance_name, 
-                                    size=size, 
-                                    setup_scripts=setup_scripts,
-                                    idle_time_before_shutdown_minutes=idle_time_before_shutdown_minutes,
-                                    ssh_public_access_enabled=True
-                                    )
-        ml_client.begin_create_or_update(compute_instance).result()
-        logging.info(f"Compute instance {compute_instance_name} created")
+            if state.lower() in ["succeeded", "failed", "canceled"]:
+                return
+
+            time.sleep(poll_interval)
+
+    idle_time_before_shutdown_minutes=60
+    # size="Standard_D8_v3"
+
+    # size="Standard_NC6s_v3"
+    # size="Standard_E16s_v3"
+    # size="Standard_E32s_v3"
+    # size="Standard_M16ms"
+
+    # size="Standard_NV18ads_A10_v5"
+    size="Standard_NC4as_T4_v3"
+    max_retries = 5
+    for attempt in range(max_retries):
+        compute_instance_name = f"w{worker_id}{exp_name}attempt{attempt}"
+        try:
+            compute_instance = ml_client.compute.get(compute_instance_name)
+            logging.info("Compute instance " + compute_instance_name + " already exists. Skipping creation")
+            logging.info(f"Compute instance status: {compute_instance.state}") # Stopped, Starting, Running, Stopping
+            if compute_instance.state in ["CreateFailed"]:
+                logging.error(f"Compute instance {compute_instance_name} is in '{compute_instance.state}' state. Deleting and recreating.")
+                ml_client.compute.begin_delete(compute_instance_name).wait()
+                raise Exception(f"Compute instance {compute_instance_name} was in '{compute_instance.state}' state and has been deleted.")
+            if compute_instance.state != "Running":
+                ml_client.compute.begin_start(compute_instance_name).wait()
+                logging.info(f"Compute instance {compute_instance_name} has been started.")
+            else:
+                logging.info(f"Compute instance {compute_instance_name} is already {compute_instance.state}.")
+        except:
+            # start the compute instance, if it doesn't exist
+            logging.info(f"Creating compute instance {compute_instance_name}...")
+
+            try:
+                if use_managed_identity:
+                    identity_config = ManagedIdentityConfiguration(
+                    client_id=azure_config['AZURE_MANAGED_IDENTITY_CLIENT_ID'],
+                    resource_id="subscriptions/" + azure_config['AZURE_SUBSCRIPTION_ID'] + "/resourceGroups/" + azure_config['AZURE_ML_RESOURCE_GROUP'] + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/" + azure_config['AZURE_ML_USER_ASSIGNED_IDENTITY'],
+                    object_id=azure_config['AZURE_MANAGED_IDENTITY_OBJECT_ID'],
+                    principal_id=azure_config['AZURE_MANAGED_IDENTITY_PRINCIPAL_ID'],
+                    )
+
+                    identity = IdentityConfiguration(
+                    type="UserAssigned",
+                    user_assigned_identities=[identity_config]
+                    )
+
+                    compute_instance = ComputeInstance(
+                        name=compute_instance_name,
+                        size=size,
+                        #setup_scripts=setup_scripts,
+                        idle_time_before_shutdown_minutes=idle_time_before_shutdown_minutes,
+                        ssh_public_access_enabled=True,
+                        identity=identity
+                    )
+                    asyncio.run(create_with_timeout(compute_instance, compute_instance_name))
+                else:
+                    compute_instance = ComputeInstance(
+                        name=compute_instance_name,
+                        size=size,
+                        #setup_scripts=setup_scripts,
+                        idle_time_before_shutdown_minutes=idle_time_before_shutdown_minutes,
+                        ssh_public_access_enabled=True
+                    )
+                    asyncio.run(create_with_timeout(compute_instance, compute_instance_name))
+                logging.info(f"Compute instance {compute_instance_name} created")
+                break
+            except Exception as e:
+                logging.error(f"Attempt {attempt+1} to create compute instance failed: {str(e)}")
+                if attempt == max_retries - 1:
+                    logging.error(f"Failed to create compute instance {compute_instance_name} after {max_retries} attempts.")
+                    raise
+                time.sleep(10)
 
     # start the job
     logging.info(f"Starting job on compute instance {compute_instance_name}...")
@@ -219,7 +268,7 @@ def launch_vm_and_job(  worker_id,
     logging.info("Experiment parameters: %s", params)
 
     src = ScriptRunConfig(source_directory="./azure_files",
-                        script='run_entry.py',
+                        script='run_entry_2.py',
                         arguments=[input, output, exp_name, num_workers, worker_id, agent, json_name, model_name, run_mode, epsilon, alpha, num_steps, N, sigma, target_action, wandb_key, hugginface_key, som_origin, a11y_backend],
                         run_config=run_config)
 
@@ -238,7 +287,7 @@ def launch_vm_and_job(  worker_id,
     log_dir = "./logs"
     os.makedirs(log_dir, exist_ok=True)
     prefixes = [
-        "azureml-logs",
+        # "azureml-logs",
         "user_logs",
     ]
 

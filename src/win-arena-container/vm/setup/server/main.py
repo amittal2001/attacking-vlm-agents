@@ -52,7 +52,7 @@ parser.add_argument("--port", help="port", type=int, default=5000)
 args = parser.parse_args()
 log_file = args.log_file
 
-logging.basicConfig(filename='server.log',level=logging.DEBUG, filemode='w' )
+logging.basicConfig(filename='server.log',level=logging.INFO, filemode='w' )
 
 # logging.basicConfig(filename=log_file,level=logging.INFO, filemode='w' )
 logger = logging.getLogger('werkzeug')

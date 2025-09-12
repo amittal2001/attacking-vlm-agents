@@ -2,6 +2,11 @@
 
 echo "Starting WinArena VM..."
 
+# echo "installing KVM..."
+# sudo modprobe kvm_amd
+# disable KVM
+# export KVM=N
+
 # Start the VM script in the background
 cd / # Fix for Azure ML Job not using the correct root path
 ./start_vm.sh &

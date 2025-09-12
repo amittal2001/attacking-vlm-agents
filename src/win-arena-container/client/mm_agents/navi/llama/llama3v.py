@@ -1,19 +1,22 @@
 
+from urllib import response
+from pydash import transform
 import base64, io, requests
 from typing import Union, List, Optional
 from PIL import Image
 import torch
-from transformers import AutoProcessor, MllamaForConditionalGeneration
+from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
 import torchvision.transforms as T
 import logging
 import sys
 from collections import Counter
 from sentence_transformers import SentenceTransformer, util
+import wandb
 
 
 # Configure logging to output to stdout
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='[%(asctime)s] %(levelname)s %(message)s',
     stream=sys.stdout
 )
@@ -21,7 +24,7 @@ logger = logging.getLogger()
 class Llama3Vision:
     def __init__(self, model_id: str = "meta-llama/Llama-3.2-11B-Vision-Instruct",
                  device: Optional[str] = None,
-                 torch_dtype: Optional[torch.dtype] = None,
+                 dtype: Optional[torch.dtype] = None,
                  use_quantized: bool = False,
                  local_files_only: bool = False):
         self.model_id = model_id
@@ -33,33 +36,38 @@ class Llama3Vision:
             self.device = device
 
         # recommended dtype on GPU
-        if torch_dtype is None:
-            self.torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
+        if dtype is None:
+            self.dtype = torch.float16 if self.device == "cuda" else torch.float32
         else:
-            self.torch_dtype = torch_dtype
+            self.dtype = dtype
 
         # Load processor (handles image + text preproc)
         logger.info(f"Loading processor from {model_id} (local_files_only={local_files_only})")
         self.processor = AutoProcessor.from_pretrained(model_id, local_files_only=local_files_only)
 
-        # Load model (use low_cpu_mem_usage and dtype hints)
-        # If you plan to use a quantized checkpoint, set use_quantized=True and ensure repository supports that.
-        logger.info(f"Loading model {model_id} on {self.device} dtype={self.torch_dtype}")
-        # NOTE: when using large models on CPU you might need to set device_map / offload to disk (use accelerate or bitsandbytes)
+        # Load model with 4-bit quantization using bitsandbytes
+        logger.info(f"Loading model {model_id} in 4-bit quantized mode on {self.device} dtype={self.dtype}")
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4"
+        )
         self.model = MllamaForConditionalGeneration.from_pretrained(
             model_id,
-            torch_dtype=self.torch_dtype,
+            dtype=self.dtype,
             low_cpu_mem_usage=True,
             local_files_only=local_files_only,
-            # device_map="auto"  # uncomment if you want Transformers to auto-place layers (needs accelerate)
+            device_map="auto",
+            quantization_config=quant_config
         )
 
         # move to device (if not using device_map)
-        if getattr(self.model, "to", None) is not None and self.device != "cpu":
-            self.model.to(self.device)
+        #if getattr(self.model, "to", None) is not None and self.device != "cpu":
+        #    self.model.to(self.device)
 
         self.loss_fn = torch.nn.CrossEntropyLoss()
-        self.sim_model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.sim_model = SentenceTransformer('all-MiniLM-L6-v2').to(self.device)
 
     # --- helpers to encode or wrap image ---
     def encode_image(self, image: Union[str, Image.Image], format="JPEG") -> str:
@@ -81,14 +89,138 @@ class Llama3Vision:
 
     # --- main multimodal call ---
     def pgd_process_images(self,
+                           system_prompt: str,
+                           question: str,
+                           images: Union[torch.Tensor, Image.Image, List[Image.Image]],
+                           targeted_plan_result: str,
+                           max_tokens=512,
+                           temperature=0.0,
+                           only_text=True,
+                           format="JPEG",
+                           num_steps=1,
+                           alpha=0.01,
+                           epsilon=0.03,  
+                           wandb_run=None) -> tuple:
+        # Always expect a single image
+        if isinstance(images, list):
+            if len(images) != 1:
+                raise ValueError(f"Expected a single image, got {len(images)}.")
+            images = images[0]
+        # If tensor, convert to PIL Image
+        if isinstance(images, torch.Tensor):
+            if images.dim() == 4 and images.shape[0] == 1:
+                images = images.squeeze(0)
+            if images.dim() == 3:
+                # Clamp and convert to uint8 if needed
+                if images.max() <= 1.0:
+                    images = images.clamp(0, 1)
+                    images = (images * 255).to(torch.uint8)
+                images = T.ToPILImage()(images.cpu())
+            else:
+                raise ValueError("Tensor must be shape [C,H,W] or [1,C,H,W]")
+        if not isinstance(images, Image.Image):
+            raise ValueError("images must be a PIL Image or list of one image.")
+
+        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
+
+        logger.info(f"Device: {self.device}")
+
+        transform = T.ToTensor()
+        image_tensor = transform(images.resize((560, 560)).convert("RGB")).unsqueeze(0).to(device)
+        adv_image_tensor = image_tensor.clone().detach().requires_grad_(True).to(device)
+
+        if wandb_run is not None:
+            columns = ["step", "response"]
+            data = []
+
+        for i in range(num_steps):
+            adv_image = T.ToPILImage()(adv_image_tensor.clone().detach().squeeze().cpu())
+            inputs = self.processor(images=adv_image, text=prompt, return_tensors="pt")
+
+            for k, v in inputs.items():
+                if torch.is_tensor(v):
+                    inputs[k] = v.to(self.device)
+
+            inputs["pixel_values"].requires_grad_(requires_grad=True)
+            gen_kwargs = dict(max_new_tokens=max_tokens,
+                            do_sample=(temperature > 0),
+                            temperature=temperature,
+                            top_p=0.95)
+
+            # Ensure aspect_ratio_ids is long if present
+            if "aspect_ratio_ids" in inputs:
+                inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
+
+            # Forward pass
+            logger.info(f"Starting {i} forward pass...")
+            outputs = self.model(**inputs)
+            logger.info(f"Finished {i} forward pass...")
+            logits = outputs.logits  # [batch, seq_len, vocab_size]
+
+            # Ensure all tensors are on the same device
+            device = logits.device
+            for k, v in inputs.items():
+                if torch.is_tensor(v):
+                    inputs[k] = v.to(device)
+
+            pred_ids = logits.argmax(dim=-1)
+            text = self.processor.decode(pred_ids[0], skip_special_tokens=True)
+            logger.info(f"Predicted text for step {i}: {text}")
+            if text == targeted_plan_result:
+                break
+            # Compute loss between model output and targeted_plan_result
+            # Tokenize the target string
+            target_tokens = self.processor.tokenizer(
+                targeted_plan_result,
+                return_tensors="pt",
+                add_special_tokens=False
+            )["input_ids"].to(device)
+
+            # Align target length with logits sequence length
+            # logits: [batch, seq_len, vocab_size], target_tokens: [1, tgt_len]
+            # We'll use the first batch (batch=0)
+            seq_len = logits.shape[1]
+            tgt_len = target_tokens.shape[1]
+            min_len = min(seq_len, tgt_len)
+            # Use only the overlapping part for loss
+            logits_for_loss = logits[0, :min_len, :]
+            targets_for_loss = target_tokens[0, :min_len]
+
+            # CrossEntropyLoss expects input [N, C] and target [N] (class indices)
+            loss = self.loss_fn(logits_for_loss, targets_for_loss)
+            loss.backward(inputs=[inputs["pixel_values"]])
+
+            logger.info(f"Loss for step {i}: {loss.item()}")
+
+            grad=inputs["pixel_values"].grad.mean(dim=2).squeeze().sign().to(device)
+
+            adv_image_tensor.data = adv_image_tensor.data - float(alpha) * grad
+            adv_image_tensor.data = torch.min(torch.max(adv_image_tensor.data, image_tensor.data - float(epsilon)), image_tensor.data + float(epsilon))
+            
+            if wandb_run is not None:
+                wandb_run.log({"step": i, "adv_image": wandb.Image(T.ToPILImage()(adv_image_tensor.clone().detach().squeeze().cpu()))})
+                wandb_run.log({"step": i, "loss": loss.item()})
+                data.append([i, response])
+
+            # Memory management: delete large tensors and clear cache
+            del loss, grad
+            torch.cuda.empty_cache()
+
+        if wandb_run is not None:
+            response_table = wandb.Table(columns=columns, data=data)
+            wandb.log({"model_responses": response_table})
+        return text, adv_image_tensor.detach().cpu()
+
+
+    def process_images(self,
                        system_prompt: str,
                        question: str,
-                       images: Union[torch.Tensor, Image.Image, List[Image.Image]],
-                       targeted_plan_result: str,
-                       max_tokens=512,
-                       temperature=0.0,
+                       images: Union[str, Image.Image, List[Union[str, Image.Image]]],
+                       max_tokens=10,
+                       temperature=0,
                        only_text=True,
-                       format="JPEG") -> tuple:
+                       format="JPEG",
+                       wandb_run=None) -> str:
         # Always expect a single image
         if isinstance(images, list):
             if len(images) != 1:
@@ -114,85 +246,9 @@ class Llama3Vision:
         logger.info(f"Device: {self.device}")
 
         inputs = self.processor(images=images, text=prompt, return_tensors="pt")
+
         for k, v in inputs.items():
-            if torch.is_floating_point(v):
-                inputs[k] = v.to(self.device, dtype=self.torch_dtype)
-            else:
-                inputs[k] = v.to(self.device)
-
-        inputs["pixel_values"].requires_grad_(requires_grad=True)
-        gen_kwargs = dict(max_new_tokens=max_tokens,
-                          do_sample=(temperature > 0),
-                          temperature=temperature,
-                          top_p=0.95)
-
-        # Ensure aspect_ratio_ids is long if present
-        if "aspect_ratio_ids" in inputs:
-            inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
-
-        # Forward pass
-        outputs = self.model(**inputs)
-        logits = outputs.logits  # [batch, seq_len, vocab_size]
-
-        pred_ids = logits.argmax(dim=-1)
-        text = self.processor.decode(pred_ids[0], skip_special_tokens=True)
-        # Compute loss between model output and targeted_plan_result
-        # Tokenize the target string
-        target_tokens = self.processor.tokenizer(
-            targeted_plan_result,
-            return_tensors="pt",
-            add_special_tokens=False
-        )["input_ids"].to(self.device)
-
-        # Align target length with logits sequence length
-        # logits: [batch, seq_len, vocab_size], target_tokens: [1, tgt_len]
-        # We'll use the first batch (batch=0)
-        seq_len = logits.shape[1]
-        tgt_len = target_tokens.shape[1]
-        min_len = min(seq_len, tgt_len)
-        # Use only the overlapping part for loss
-        logits_for_loss = logits[0, :min_len, :]
-        targets_for_loss = target_tokens[0, :min_len]
-
-        # CrossEntropyLoss expects input [N, C] and target [N] (class indices)
-        loss = self.loss_fn(logits_for_loss, targets_for_loss)
-        loss.backward()
-
-        grad=inputs["pixel_values"].grad.mean(dim=2).squeeze().sign()
-        
-        return loss.item(), text, grad
-    
-
-    def process_images(self, system_prompt: str, question: str, images: Union[str, Image.Image, List[Union[str, Image.Image]]], max_tokens=30, temperature=0, only_text=True, format="JPEG") -> str:
-        # Always expect a single image
-        if isinstance(images, list):
-            if len(images) != 1:
-                raise ValueError(f"Expected a single image, got {len(images)}.")
-            images = images[0]
-        # If tensor, convert to PIL Image
-        if isinstance(images, torch.Tensor):
-            if images.dim() == 4 and images.shape[0] == 1:
-                images = images.squeeze(0)
-            if images.dim() == 3:
-                # Clamp and convert to uint8 if needed
-                if images.max() <= 1.0:
-                    images = images.clamp(0, 1)
-                    images = (images * 255).to(torch.uint8)
-                images = T.ToPILImage()(images.cpu())
-            else:
-                raise ValueError("Tensor must be shape [C,H,W] or [1,C,H,W]")
-        if not isinstance(images, Image.Image):
-            raise ValueError("images must be a PIL Image or list of one image.")
-
-        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
-
-        logger.info(f"Device: {self.device}")
-
-        inputs = self.processor(images=images, text=prompt, return_tensors="pt")
-        for k, v in inputs.items():
-            if torch.is_floating_point(v):
-                inputs[k] = v.to(self.device, dtype=self.torch_dtype)
-            else:
+            if torch.is_tensor(v):
                 inputs[k] = v.to(self.device)
 
         # Ensure aspect_ratio_ids is long if present
@@ -200,11 +256,21 @@ class Llama3Vision:
             inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
 
         # Generate
+        logger.info(f"Starting forward pass...")
         outputs = self.model.generate(**inputs, max_new_tokens=max_tokens)
+        logger.info(f"Finished forward pass...")
+
+        prompt_len = inputs["input_ids"].shape[1]
+        text = self.processor.decode(outputs[0][prompt_len:], skip_special_tokens=True)
+        logger.info(f"Predicted text: {text}")
+
+        if wandb_run is not None:
+            table = wandb.Table(columns=["model_response"])
+            table.add_data(text)
+            wandb_run.log({"model_response": table})
 
         if only_text:
-            prompt_len = inputs["input_ids"].shape[1]
-            return self.processor.decode(outputs[0][prompt_len:], skip_special_tokens=True)
+            return text
         return outputs
     
     def choose_consistent_prediction(self, preds, threshold=0.8):
@@ -220,8 +286,8 @@ class Llama3Vision:
         majority_pred, _ = Counter(preds).most_common(1)[0]
 
         # Encode once
-        emb_majority = self.sim_model.encode(majority_pred, convert_to_tensor=True)
-        emb_all = self.sim_model.encode(preds, convert_to_tensor=True)
+        emb_majority = self.sim_model.encode(majority_pred.to(self.device), convert_to_tensor=True)
+        emb_all = self.sim_model.encode([p.to(self.device) for p in preds], convert_to_tensor=True)
 
         # Compute cosine similarities
         sims = util.cos_sim(emb_majority, emb_all).squeeze().cpu().numpy()
@@ -238,7 +304,17 @@ class Llama3Vision:
         else:
             return "no answer"
         
-    def process_images_rand_smooth(self, system_prompt: str, question: str, images: Union[str, Image.Image, List[Union[str, Image.Image]]], max_tokens=30, temperature=0, only_text=True, format="JPEG", N=10, sigma=0.1) -> str:
+    def process_images_rand_smooth(self,
+                                   system_prompt: str,
+                                   question: str,
+                                   images: Union[str, Image.Image, List[Union[str, Image.Image]]],
+                                   max_tokens=30,
+                                   temperature=0,
+                                   only_text=True,
+                                   format="JPEG",
+                                   N=10,
+                                   sigma=0.1,
+                                   wandb_run=None) -> str:
         # Always expect a single image
         if isinstance(images, list):
             if len(images) != 1:
@@ -266,23 +342,48 @@ class Llama3Vision:
         ])
 
         preds = []
+        if wandb_run is not None:
+            columns = ["n", "response"]
+            data = []
+        
         for n in range(N):
-          noisy_image = add_noise(images.copy())
-          prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
-          inputs = self.processor(images=noisy_image, text=prompt, return_tensors="pt")
-          for k, v in inputs.items():
-              if torch.is_floating_point(v):
-                  inputs[k] = v.to(self.device, dtype=self.torch_dtype)
-              else:
-                  inputs[k] = v.to(self.device)
-          if "aspect_ratio_ids" in inputs:
-              inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
-          # Generate
-          outputs = self.model.generate(**inputs, max_new_tokens=max_tokens)
-          # Get how many tokens came from the prompt
-          prompt_len = inputs["input_ids"].shape[1]
-          text = self.processor.decode(outputs[0][prompt_len:], skip_special_tokens=True)
-          logger.info(f"{n}'th answer: {text}")
-          preds.append(text)
+            noisy_image = add_noise(images.copy())
+            prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
+            inputs = self.processor(images=noisy_image, text=prompt, return_tensors="pt")
+
+            for k, v in inputs.items():
+                if torch.is_tensor(v):
+                    inputs[k] = v.to(self.device)
+
+            if "aspect_ratio_ids" in inputs:
+                inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
+
+            # Generate
+            logger.info(f"Starting {n} forward pass...")
+            outputs = self.model.generate(**inputs, max_new_tokens=max_tokens)
+            logger.info(f"Finished {n} forward pass...")
+
+            # Get how many tokens came from the prompt
+            prompt_len = inputs["input_ids"].shape[1]
+            text = self.processor.decode(outputs[0][prompt_len:], skip_special_tokens=True)
+            logger.info(f"{n}'th answer: {text}")
+            preds.append(text)
+
+            if wandb_run is not None:
+                data.append([n, text])
+            
+            del inputs, outputs
+            torch.cuda.empty_cache()
+
         smoothed_pred = self.choose_consistent_prediction(preds, threshold=0.8)
+        logger.info(f"Smoothed prediction: {smoothed_pred}")
+
+        if wandb_run is not None:
+            response_table = wandb.Table(columns=columns, data=data)
+            wandb.log({"model_responses": response_table})
+
+            final_response_table = wandb.Table(columns=["model_final_response"])
+            final_response_table.add_data(smoothed_pred)
+            wandb_run.log({"model_final_response": final_response_table})
+
         return smoothed_pred
