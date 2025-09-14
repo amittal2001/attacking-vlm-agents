@@ -150,7 +150,7 @@ def launch_vm_and_job(  worker_id,
 
             time.sleep(poll_interval)
 
-    idle_time_before_shutdown_minutes=60
+    idle_time_before_shutdown_minutes=120
     # size="Standard_D8_v3"
 
     # size="Standard_NC6s_v3"

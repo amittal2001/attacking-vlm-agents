@@ -16,29 +16,22 @@ import requests
 from io import BytesIO
 
 def parse_args():
-	parser = argparse.ArgumentParser(description="Clean Run Arguments")
-	parser.add_argument('--agent_name', type=str, required=True)
-	parser.add_argument('--worker_id', type=str, required=True)
-	parser.add_argument('--num_workers', type=str, required=True)
-	parser.add_argument('--result_dir', type=str, required=True)
-	parser.add_argument('--test_all_meta_path', type=str, required=True)
-	parser.add_argument('--model', type=str, required=True)
-	parser.add_argument('--som_origin', type=str, required=True)
-	parser.add_argument('--a11y_backend', type=str, required=True)
-	parser.add_argument('--wandb_key', type=str, required=True)
-	parser.add_argument('--hugginface_key', type=str, required=True)
-	return parser.parse_args()
+    parser = argparse.ArgumentParser(description="Clean Run Arguments")
+    parser.add_argument('--agent_name', type=str, required=True)
+    parser.add_argument('--worker_id', type=str, required=True)
+    parser.add_argument('--num_workers', type=str, required=True)
+    parser.add_argument('--result_dir', type=str, required=True)
+    parser.add_argument('--test_all_meta_path', type=str, required=True)
+    parser.add_argument('--model', type=str, required=True)
+    parser.add_argument('--som_origin', type=str, required=True)
+    parser.add_argument('--a11y_backend', type=str, required=True)
+    parser.add_argument('--wandb_key', type=str, required=True)
+    parser.add_argument('--hugginface_key', type=str, required=True)
+    args, unknown = parser.parse_known_args()
+    return args
 
 if __name__ == "__main__":
     args = parse_args()
-
-    wandb.login(key=args.wandb_key)
-    wandb_run = wandb.init(
-        project="mip-generator-attack",
-        name=f"Clean-Run",
-        config={
-        }
-    )
 
     login(args.hugginface_key)
 
@@ -51,17 +44,20 @@ if __name__ == "__main__":
 
     img_path = os.path.join("data", "backgrounds", "example_desktop.jpg")
     img = Image.open(img_path).resize((560, 560)).convert("RGB")
+    adv_img_path = os.path.join("data", "backgrounds", "adv_example_desktop.jpg")
+    adv_img = Image.open(adv_img_path).resize((560, 560)).convert("RGB")
 
     # ========================
     #  Define prompt
     # ========================
+
     system_prompt = "You are a helpful assistant."
     question = "Describe the content of this image shortly."
-    targeted_plan_result = args.target_action
 
     # =========================
     #  Initialize the model
     # =========================
+
     model = Llama3Vision(
         model_id="meta-llama/Llama-3.2-11B-Vision-Instruct",
     )
@@ -70,8 +66,13 @@ if __name__ == "__main__":
     #  Run process_images
     # =========================
 
-    wandb_run.log({"original_image": wandb.Image(img)})
-
+    wandb.login(key=args.wandb_key)
+    wandb_run = wandb.init(
+        project="mip-generator-attack",
+        name=f"Clean-Run-On-Clean-Image",
+        config={
+        }
+    )
 
     response = model.process_images(
         system_prompt=system_prompt,
@@ -82,3 +83,21 @@ if __name__ == "__main__":
 
     wandb.finish()
 
+    torch.cuda.empty_cache()
+
+    wandb.login(key=args.wandb_key)
+    wandb_run = wandb.init(
+        project="mip-generator-attack",
+        name=f"Clean-Run-On-Adversarial-Image",
+        config={
+        }
+    )
+
+    response = model.process_images(
+        system_prompt=system_prompt,
+        question=question,
+        images=adv_img,
+        wandb_run=wandb_run
+    )
+
+    wandb.finish()

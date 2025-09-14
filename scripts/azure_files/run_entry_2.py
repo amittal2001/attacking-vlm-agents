@@ -27,14 +27,19 @@ def main():
     a11y_backend = sys.argv[19]
 
     # print all args
-    print("All args:")
-    for arg in sys.argv:
-        print(arg)
+    print("Arguments:")
+    arg_names = [
+        "storage_path", "mounted_output_path", "exp_name", "num_workers", "worker_id", "agent", "json_name",
+        "model_name", "run_mode", "epsilon", "alpha", "num_steps", "N", "sigma", "target_action",
+        "wandb_key", "hugginface_key", "som_origin", "a11y_backend"
+    ]
+    for i, name in enumerate(arg_names, start=1):
+        print(f"  {name}: {sys.argv[i]}")
 
     print("Starting entry script...")
 
-    print("Folder at ./:")
-    subprocess.run(['ls', '-la'], check=True)
+    # print("Folder at ./:")
+    # subprocess.run(['ls', '-la'], check=True)
 
     # create a folder with the specified path and experiment name
     result_dir = os.path.join(mounted_output_path, exp_name)
@@ -61,8 +66,8 @@ def main():
     #     print("NET_ADMIN capability is not enabled")   
 
     # launches the client script    
-    print("display the content of /client")  
-    os.system("ls -l /client")  
+    # print("display the content of /client")  
+    # os.system("ls -l /client")  
     os.system(f"cd /client && python {run_mode} --agent_name {agent} --worker_id {worker_id} --num_workers {num_workers} --result_dir {result_dir} --test_all_meta_path {json_name} --model {model_name} --som_origin {som_origin} --a11y_backend {a11y_backend} --epsilon {epsilon} --alpha {alpha} --num_steps {num_steps} --N {N} --sigma {sigma} --target_action {target_action} --wandb_key {wandb_key} --hugginface_key {hugginface_key}")
 
     print("Finished running entry script")

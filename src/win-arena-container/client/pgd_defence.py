@@ -16,20 +16,21 @@ import requests
 from io import BytesIO
 
 def parse_args():
-	parser = argparse.ArgumentParser(description="Clean Run Arguments")
-	parser.add_argument('--agent_name', type=str, required=True)
-	parser.add_argument('--worker_id', type=str, required=True)
-	parser.add_argument('--num_workers', type=str, required=True)
-	parser.add_argument('--result_dir', type=str, required=True)
-	parser.add_argument('--test_all_meta_path', type=str, required=True)
-	parser.add_argument('--model', type=str, required=True)
-	parser.add_argument('--som_origin', type=str, required=True)
-	parser.add_argument('--a11y_backend', type=str, required=True)
-	parser.add_argument('--N', type=str, required=True)
-	parser.add_argument('--sigma', type=str, required=True)
-	parser.add_argument('--wandb_key', type=str, required=True)
-	parser.add_argument('--hugginface_key', type=str, required=True)
-	return parser.parse_args()
+    parser = argparse.ArgumentParser(description="Clean Run Arguments")
+    parser.add_argument('--agent_name', type=str, required=True)
+    parser.add_argument('--worker_id', type=str, required=True)
+    parser.add_argument('--num_workers', type=str, required=True)
+    parser.add_argument('--result_dir', type=str, required=True)
+    parser.add_argument('--test_all_meta_path', type=str, required=True)
+    parser.add_argument('--model', type=str, required=True)
+    parser.add_argument('--som_origin', type=str, required=True)
+    parser.add_argument('--a11y_backend', type=str, required=True)
+    parser.add_argument('--N', type=str, required=True)
+    parser.add_argument('--sigma', type=str, required=True)
+    parser.add_argument('--wandb_key', type=str, required=True)
+    parser.add_argument('--hugginface_key', type=str, required=True)
+    args, unknown = parser.parse_known_args()
+    return args
 
 if __name__ == "__main__":
     args = parse_args()
@@ -51,15 +52,17 @@ if __name__ == "__main__":
     # ========================
     #  Define prompt
     # ========================
+
     system_prompt = "You are a helpful assistant."
     question = "Describe the content of this image shortly."
-    targeted_plan_result = args.target_action
 
     # =========================
     #  Initialize the model
     # =========================
+
     model = Llama3Vision(
         model_id="meta-llama/Llama-3.2-11B-Vision-Instruct",
+        use_sim_model=True,
     )
 
     # =========================
@@ -69,7 +72,7 @@ if __name__ == "__main__":
     wandb.login(key=args.wandb_key)
     wandb_run = wandb.init(
         project="mip-generator-attack",
-        name=f"PGD-Defence-On_Clean_Image",
+        name=f"PGD-Defence-On-Clean-Image",
         config={
             "N": args.N,
             "sigma": args.sigma
@@ -92,13 +95,12 @@ if __name__ == "__main__":
     wandb.login(key=args.wandb_key)
     wandb_run = wandb.init(
         project="mip-generator-attack",
-        name=f"PGD-Defence-On_Adversarial_Image",
+        name=f"PGD-Defence-On-Adversarial-Image",
         config={
             "N": args.N,
             "sigma": args.sigma
         }
     )
-
 
     adv_response = model.process_images_rand_smooth(
         system_prompt=system_prompt,
