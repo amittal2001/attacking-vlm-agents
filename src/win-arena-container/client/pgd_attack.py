@@ -29,6 +29,8 @@ def parse_args():
     parser.add_argument('--alpha', type=str, required=True)
     parser.add_argument('--num_steps', type=str, required=True)
     parser.add_argument('--target_action', type=str, required=True)
+    parser.add_argument('--N', type=str, required=False)
+    parser.add_argument('--sigma', type=str, required=False)
     parser.add_argument('--wandb_key', type=str, required=True)
     parser.add_argument('--hugginface_key', type=str, required=True)
     args, unknown = parser.parse_known_args()
@@ -63,6 +65,7 @@ if __name__ == "__main__":
 
     model = Llama3Vision(
         model_id="meta-llama/Llama-3.2-11B-Vision-Instruct",
+        use_sim_model=True
     )
 
     # =========================
@@ -94,3 +97,52 @@ if __name__ == "__main__":
 
     wandb.finish()
 
+    # =========================
+    #  Run process_images
+    # =========================
+
+    torch.cuda.empty_cache()
+
+    wandb.login(key=args.wandb_key)
+    wandb_run = wandb.init(
+        project="mip-generator-attack",
+        name=f"Clean-Run-On-Adversarial-Image",
+        config={
+        }
+    )
+
+    response = model.process_images(
+        system_prompt=system_prompt,
+        question=question,
+        images=adv_image_tensor,
+        wandb_run=wandb_run
+    )
+
+    wandb.finish()
+
+    # =========================
+    #  Run process_images_rand_smooth
+    # =========================
+
+    torch.cuda.empty_cache()
+
+    wandb.login(key=args.wandb_key)
+    wandb_run = wandb.init(
+        project="mip-generator-attack",
+        name=f"PGD-Defence-On-Adversarial-Image",
+        config={
+            "N": args.N,
+            "sigma": args.sigma
+        }
+    )
+
+    adv_response = model.process_images_rand_smooth(
+        system_prompt=system_prompt,
+        question=question,
+        images=adv_image_tensor,
+        N=int(args.N),
+        sigma=float(args.sigma),
+        wandb_run=wandb_run
+    )
+
+    wandb.finish()

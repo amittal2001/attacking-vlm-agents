@@ -130,14 +130,20 @@ class Llama3Vision:
 
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
 
+        
+        if wandb_run is not None:
+            wandb_run.log({"original_image": wandb.Image(images)})
+            prompt_table = wandb.Table(columns=["prompt"])
+            prompt_table.add_data(prompt)
+            wandb_run.log({"prompt": prompt_table})
+
         device = self.device
+        logger.info(f"Prompt: {prompt}")
         logger.info(f"Device: {device}")
 
         transform = T.ToTensor()
         image_tensor = transform(images.resize((560, 560)).convert("RGB")).unsqueeze(0).cpu()
         adv_image_tensor = image_tensor.clone().detach().cpu()
-        # print min/max values
-        logger.info(f"Initial image tensor min/max: {image_tensor.min().item()}/{image_tensor.max().item()}")
 
         if wandb_run is not None:
             columns = ["step", "response"]
@@ -161,6 +167,9 @@ class Llama3Vision:
             if "aspect_ratio_ids" in inputs:
                 inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
 
+            #log inputs["pixel_values"] min max mean std
+            #logger.info(f"inputs['pixel_values'] min: {inputs['pixel_values'].min().item()}, max: {inputs['pixel_values'].max().item()}, mean: {inputs['pixel_values'].mean().item()}, std: {inputs['pixel_values'].std().item()}")
+
             # Forward pass
             logger.info(f"Starting {i} forward pass...")
             outputs = self.model(**inputs)
@@ -168,9 +177,12 @@ class Llama3Vision:
             logits = outputs.logits  # [batch, seq_len, vocab_size]
 
             pred_ids = logits.argmax(dim=-1)
-            text = self.processor.decode(pred_ids[0], skip_special_tokens=True)
+            next_token_id = pred_ids[0, -1].unsqueeze(0)
+            #text = self.processor.decode(pred_ids[0], skip_special_tokens=True)
+            text = self.processor.decode(next_token_id, skip_special_tokens=True)
             logger.info(f"Predicted text for step {i}: {text}")
             if text == targeted_plan_result:
+                data.append([i, text])
                 break
             # Compute loss between model output and targeted_plan_result
             # Tokenize the target string
@@ -183,20 +195,29 @@ class Llama3Vision:
             # Align target length with logits sequence length
             # logits: [batch, seq_len, vocab_size], target_tokens: [1, tgt_len]
             # We'll use the first batch (batch=0)
-            seq_len = logits.shape[1]
-            tgt_len = target_tokens.shape[1]
-            min_len = min(seq_len, tgt_len)
+            # seq_len = logits.shape[1]
+            # tgt_len = target_tokens.shape[1]
+            # min_len = min(seq_len, tgt_len)
             # Use only the overlapping part for loss
-            logits_for_loss = logits[0, :min_len, :].to(device)
-            targets_for_loss = target_tokens[0, :min_len].to(device)
+            # logits_for_loss = logits[0, :min_len, :].to(device)
+            # logits_for_loss = logits[0, :min_len, :].to(device)
+            # targets_for_loss = target_tokens[0, :min_len].to(device)
+
+            next_token_logits = logits[0, -1].to(device)
+            target_token = target_tokens[0, 0].to(device)
+            loss = self.loss_fn(next_token_logits.unsqueeze(0), target_token.unsqueeze(0))
+
 
             # CrossEntropyLoss expects input [N, C] and target [N] (class indices)
-            loss = self.loss_fn(logits_for_loss, targets_for_loss)
+            # loss = self.loss_fn(logits_for_loss, targets_for_loss)
             logger.info(f"Loss for step {i}: {loss.item()}")
+            logger.info(f"next token logits for step {i}: {next_token_logits.max().item()} for token {text}")
+            logger.info(f"target token logits for step {i}: {next_token_logits[target_token.item()].item()} for token {targeted_plan_result}")
             
             #loss.backward(inputs=[inputs["pixel_values"]])
             grad = torch.autograd.grad(loss, inputs["pixel_values"], retain_graph=False, create_graph=False)[0]
-            grad = grad.mean(dim=2).squeeze().sign().cpu()
+            #grad = grad.mean(dim=2).squeeze().sign().cpu()
+            grad = grad[:, :, 0].squeeze().sign().cpu()
             #grad=inputs["pixel_values"].grad.mean(dim=2).squeeze().sign().cpu()
 
             with torch.no_grad():
@@ -208,7 +229,9 @@ class Llama3Vision:
                 wandb_run.log({
                     "step": i,
                     "adv_image": wandb.Image(T.ToPILImage()(adv_image_tensor.clone().detach().squeeze().cpu())),
-                    "loss": loss.item()
+                    "loss": loss.item(),
+                    "logits_max_next_token": next_token_logits.max().item(),
+                    "logits_target_token": next_token_logits[target_token.item()].item()
                 })
                 data.append([i, text])
 
@@ -230,7 +253,7 @@ class Llama3Vision:
                        system_prompt: str,
                        question: str,
                        images: Union[str, Image.Image, List[Union[str, Image.Image]]],
-                       max_tokens=50,
+                       max_tokens=100,
                        temperature=0,
                        only_text=True,
                        format="JPEG",
@@ -257,7 +280,14 @@ class Llama3Vision:
 
         prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
 
+        if wandb_run is not None:
+            wandb_run.log({"input_image": wandb.Image(images)})
+            prompt_table = wandb.Table(columns=["prompt"])
+            prompt_table.add_data(prompt)
+            wandb_run.log({"prompt": prompt_table})
+
         device = self.device
+        logger.info(f"Prompt: {prompt}")
         logger.info(f"Device: {device}")
 
         inputs = self.processor(images=images, text=prompt, return_tensors="pt")
@@ -330,7 +360,7 @@ class Llama3Vision:
                                    system_prompt: str,
                                    question: str,
                                    images: Union[str, Image.Image, List[Union[str, Image.Image]]],
-                                   max_tokens=10,
+                                   max_tokens=100,
                                    temperature=0,
                                    only_text=True,
                                    format="JPEG",
@@ -357,7 +387,16 @@ class Llama3Vision:
         if not isinstance(images, Image.Image):
             raise ValueError("images must be a PIL Image or list of one image.")
         
+        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
+
+        if wandb_run is not None:
+            wandb_run.log({"input_image": wandb.Image(images)})
+            prompt_table = wandb.Table(columns=["prompt"])
+            prompt_table.add_data(prompt)
+            wandb_run.log({"prompt": prompt_table})
+
         device = self.device
+        logger.info(f"Prompt: {prompt}")
         logger.info(f"Device: {device}")
 
         add_noise = T.Compose([
@@ -373,7 +412,6 @@ class Llama3Vision:
         
         for n in range(N):
             noisy_image = add_noise(images.copy())
-            prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
             inputs = self.processor(images=noisy_image, text=prompt, return_tensors="pt")
 
             for k, v in inputs.items():
@@ -396,6 +434,10 @@ class Llama3Vision:
             preds.append(text)
 
             if wandb_run is not None:
+                wandb_run.log({
+                    "step": n,
+                    "image": wandb.Image(noisy_image),
+                })
                 data.append([n, text])
             
             del inputs, outputs

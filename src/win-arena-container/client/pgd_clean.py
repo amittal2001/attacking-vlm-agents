@@ -101,3 +101,9 @@ if __name__ == "__main__":
     )
 
     wandb.finish()
+
+    # =========================
+    #  Run process_images_rand_smooth
+    # =========================
+
+    
