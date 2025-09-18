@@ -18,13 +18,14 @@ def main():
     epsilon = sys.argv[10]
     alpha = sys.argv[11]
     num_steps = sys.argv[12]
-    N = sys.argv[13]
-    sigma = sys.argv[14]
-    target_action = sys.argv[15]
-    wandb_key = sys.argv[16]
-    hugginface_key = sys.argv[17]
-    som_origin = sys.argv[18]
-    a11y_backend = sys.argv[19]
+    early_stopping = sys.argv[13]
+    N = sys.argv[14]
+    sigma = sys.argv[15]
+    target_action = sys.argv[16]
+    wandb_key = sys.argv[17]
+    hugginface_key = sys.argv[18]
+    som_origin = sys.argv[19]
+    a11y_backend = sys.argv[20]
 
     # print all args
     print("All args:")
@@ -85,7 +86,7 @@ def main():
     # launches the client script    
     print("display the content of /client")  
     os.system("ls -l /client")  
-    os.system(f"cd /client && python {run_mode} --agent_name {agent} --worker_id {worker_id} --num_workers {num_workers} --result_dir {result_dir} --test_all_meta_path {json_name} --model {model_name} --som_origin {som_origin} --a11y_backend {a11y_backend} --epsilon {epsilon} --alpha {alpha} --num_steps {num_steps} --N {N} --sigma {sigma} --target_action {target_action} --wandb_key {wandb_key} --hugginface_key {hugginface_key}")
+    os.system(f"cd /client && python {run_mode} --agent_name {agent} --worker_id {worker_id} --num_workers {num_workers} --result_dir {result_dir} --test_all_meta_path {json_name} --model {model_name} --som_origin {som_origin} --a11y_backend {a11y_backend} --epsilon {epsilon} --alpha {alpha} --num_steps {num_steps} --early_stopping {early_stopping} --N {N} --sigma {sigma} --target_action {target_action} --wandb_key {wandb_key} --hugginface_key {hugginface_key}")
 
     print("Finished running entry script")
 

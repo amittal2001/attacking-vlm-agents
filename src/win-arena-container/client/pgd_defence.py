@@ -25,8 +25,8 @@ def parse_args():
     parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--som_origin', type=str, required=True)
     parser.add_argument('--a11y_backend', type=str, required=True)
-    parser.add_argument('--N', type=str, required=True)
-    parser.add_argument('--sigma', type=str, required=True)
+    parser.add_argument('--N', type=int, required=True)
+    parser.add_argument('--sigma', type=float, required=True)
     parser.add_argument('--wandb_key', type=str, required=True)
     parser.add_argument('--hugginface_key', type=str, required=True)
     args, unknown = parser.parse_known_args()
@@ -62,7 +62,6 @@ if __name__ == "__main__":
 
     model = Llama3Vision(
         model_id="meta-llama/Llama-3.2-11B-Vision-Instruct",
-        use_sim_model=True,
     )
 
     # =========================
@@ -83,8 +82,8 @@ if __name__ == "__main__":
         system_prompt=system_prompt,
         question=question,
         images=img,
-        N=int(args.N),
-        sigma=float(args.sigma),
+        N=args.N,
+        sigma=args.sigma,
         wandb_run=wandb_run
     )
 
@@ -106,8 +105,8 @@ if __name__ == "__main__":
         system_prompt=system_prompt,
         question=question,
         images=adv_img,
-        N=int(args.N),
-        sigma=float(args.sigma),
+        N=args.N,
+        sigma=args.sigma,
         wandb_run=wandb_run
     )
 

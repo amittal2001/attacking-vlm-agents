@@ -25,12 +25,13 @@ def parse_args():
     parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--som_origin', type=str, required=True)
     parser.add_argument('--a11y_backend', type=str, required=True)
-    parser.add_argument('--epsilon', type=str, required=True)
-    parser.add_argument('--alpha', type=str, required=True)
-    parser.add_argument('--num_steps', type=str, required=True)
+    parser.add_argument('--epsilon', type=float, required=True)
+    parser.add_argument('--alpha', type=float, required=True)
+    parser.add_argument('--num_steps', type=int, required=True)
+    parser.add_argument('--early_stopping', type=str, required=True)
     parser.add_argument('--target_action', type=str, required=True)
-    parser.add_argument('--N', type=str, required=False)
-    parser.add_argument('--sigma', type=str, required=False)
+    parser.add_argument('--N', type=int, required=False)
+    parser.add_argument('--sigma', type=float, required=False)
     parser.add_argument('--wandb_key', type=str, required=True)
     parser.add_argument('--hugginface_key', type=str, required=True)
     args, unknown = parser.parse_known_args()
@@ -65,7 +66,6 @@ if __name__ == "__main__":
 
     model = Llama3Vision(
         model_id="meta-llama/Llama-3.2-11B-Vision-Instruct",
-        use_sim_model=True
     )
 
     # =========================
@@ -80,7 +80,8 @@ if __name__ == "__main__":
             "targeted_plan_result": args.target_action,
             "epsilon": args.epsilon,
             "alpha": args.alpha,
-            "iters": args.num_steps
+            "iters": args.num_steps,
+            "early_stopping": args.early_stopping
         }
     )
 
@@ -89,9 +90,10 @@ if __name__ == "__main__":
         question=question,
         images=img,
         targeted_plan_result=targeted_plan_result,  
-        num_steps=int(args.num_steps),
-        alpha=float(args.alpha),
-        epsilon=float(args.epsilon),
+        num_steps=args.num_steps,
+        alpha=args.alpha,
+        epsilon=args.epsilon,
+        early_stopping=args.early_stopping,
         wandb_run=wandb_run
     )
 
@@ -101,48 +103,50 @@ if __name__ == "__main__":
     #  Run process_images
     # =========================
 
-    torch.cuda.empty_cache()
 
-    wandb.login(key=args.wandb_key)
-    wandb_run = wandb.init(
-        project="mip-generator-attack",
-        name=f"Clean-Run-On-Adversarial-Image",
-        config={
-        }
-    )
+    if int(args.N) != 0:
+        torch.cuda.empty_cache()
 
-    response = model.process_images(
-        system_prompt=system_prompt,
-        question=question,
-        images=adv_image_tensor,
-        wandb_run=wandb_run
-    )
+        wandb.login(key=args.wandb_key)
+        wandb_run = wandb.init(
+            project="mip-generator-attack",
+            name=f"Clean-Run-On-Adversarial-Image",
+            config={
+            }
+        )
 
-    wandb.finish()
+        response = model.process_images(
+            system_prompt=system_prompt,
+            question=question,
+            images=adv_image_tensor,
+            wandb_run=wandb_run
+        )
 
-    # =========================
-    #  Run process_images_rand_smooth
-    # =========================
+        wandb.finish()
 
-    torch.cuda.empty_cache()
+        # =========================
+        #  Run process_images_rand_smooth
+        # =========================
 
-    wandb.login(key=args.wandb_key)
-    wandb_run = wandb.init(
-        project="mip-generator-attack",
-        name=f"PGD-Defence-On-Adversarial-Image",
-        config={
-            "N": args.N,
-            "sigma": args.sigma
-        }
-    )
+        torch.cuda.empty_cache()
 
-    adv_response = model.process_images_rand_smooth(
-        system_prompt=system_prompt,
-        question=question,
-        images=adv_image_tensor,
-        N=int(args.N),
-        sigma=float(args.sigma),
-        wandb_run=wandb_run
-    )
+        wandb.login(key=args.wandb_key)
+        wandb_run = wandb.init(
+            project="mip-generator-attack",
+            name=f"PGD-Defence-On-Adversarial-Image",
+            config={
+                "N": args.N,
+                "sigma": args.sigma
+            }
+        )
 
-    wandb.finish()
+        adv_response = model.process_images_rand_smooth(
+            system_prompt=system_prompt,
+            question=question,
+            images=adv_image_tensor,
+            N=args.N,
+            sigma=args.sigma,
+            wandb_run=wandb_run
+        )
+
+        wandb.finish()

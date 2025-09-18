@@ -13,6 +13,7 @@
     "epsilon": 1,
     "alpha": 0.001,
     "num_steps": 200,
+    "early_stopping": true,
     "N": 3,
     "sigma": 0.1,
     "target_action": "dog",

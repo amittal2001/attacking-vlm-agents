@@ -26,8 +26,7 @@ class Llama3Vision:
                  device: Optional[str] = None,
                  dtype: Optional[torch.dtype] = None,
                  use_quantized: bool = False,
-                 local_files_only: bool = False,
-                 use_sim_model: bool = False):
+                 local_files_only: bool = False,):
         self.model_id = model_id
         self.local_files_only = local_files_only
         # auto-select device
@@ -68,11 +67,7 @@ class Llama3Vision:
         # move to device (if not using device_map)
         self.model.to(self.device)
 
-        if use_sim_model:
-            logger.info(f"Loading model all-MiniLM-L6-v2 on {self.device} dtype={self.dtype}")
-            self.sim_model = SentenceTransformer('all-MiniLM-L6-v2').to(self.device)
-            for p in self.sim_model.parameters():
-                p.requires_grad_(False)
+        logger.info(f"Loading model all-MiniLM-L6-v2 on {self.device} dtype={self.dtype}")
     
         self.loss_fn = torch.nn.CrossEntropyLoss()
 
@@ -106,7 +101,8 @@ class Llama3Vision:
                            format="JPEG",
                            num_steps=1,
                            alpha=0.01,
-                           epsilon=0.03,  
+                           epsilon=0.03,
+                           early_stopping="True",
                            wandb_run=None) -> tuple:
         # Always expect a single image
         if isinstance(images, list):
@@ -144,6 +140,8 @@ class Llama3Vision:
         transform = T.ToTensor()
         image_tensor = transform(images.resize((560, 560)).convert("RGB")).unsqueeze(0).cpu()
         adv_image_tensor = image_tensor.clone().detach().cpu()
+        best_loss = float("inf")
+        best_adv_image = adv_image_tensor.clone().detach().cpu()
 
         if wandb_run is not None:
             columns = ["step", "response"]
@@ -167,9 +165,6 @@ class Llama3Vision:
             if "aspect_ratio_ids" in inputs:
                 inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
 
-            #log inputs["pixel_values"] min max mean std
-            #logger.info(f"inputs['pixel_values'] min: {inputs['pixel_values'].min().item()}, max: {inputs['pixel_values'].max().item()}, mean: {inputs['pixel_values'].mean().item()}, std: {inputs['pixel_values'].std().item()}")
-
             # Forward pass
             logger.info(f"Starting {i} forward pass...")
             outputs = self.model(**inputs)
@@ -178,13 +173,9 @@ class Llama3Vision:
 
             pred_ids = logits.argmax(dim=-1)
             next_token_id = pred_ids[0, -1].unsqueeze(0)
-            #text = self.processor.decode(pred_ids[0], skip_special_tokens=True)
             text = self.processor.decode(next_token_id, skip_special_tokens=True)
             logger.info(f"Predicted text for step {i}: {text}")
-            if text == targeted_plan_result:
-                data.append([i, text])
-                break
-            # Compute loss between model output and targeted_plan_result
+            
             # Tokenize the target string
             target_tokens = self.processor.tokenizer(
                 targeted_plan_result,
@@ -192,33 +183,24 @@ class Llama3Vision:
                 add_special_tokens=False
             )["input_ids"]
 
-            # Align target length with logits sequence length
-            # logits: [batch, seq_len, vocab_size], target_tokens: [1, tgt_len]
-            # We'll use the first batch (batch=0)
-            # seq_len = logits.shape[1]
-            # tgt_len = target_tokens.shape[1]
-            # min_len = min(seq_len, tgt_len)
-            # Use only the overlapping part for loss
-            # logits_for_loss = logits[0, :min_len, :].to(device)
-            # logits_for_loss = logits[0, :min_len, :].to(device)
-            # targets_for_loss = target_tokens[0, :min_len].to(device)
-
             next_token_logits = logits[0, -1].to(device)
             target_token = target_tokens[0, 0].to(device)
             loss = self.loss_fn(next_token_logits.unsqueeze(0), target_token.unsqueeze(0))
 
-
-            # CrossEntropyLoss expects input [N, C] and target [N] (class indices)
-            # loss = self.loss_fn(logits_for_loss, targets_for_loss)
             logger.info(f"Loss for step {i}: {loss.item()}")
             logger.info(f"next token logits for step {i}: {next_token_logits.max().item()} for token {text}")
             logger.info(f"target token logits for step {i}: {next_token_logits[target_token.item()].item()} for token {targeted_plan_result}")
-            
-            #loss.backward(inputs=[inputs["pixel_values"]])
+
+            if loss.item() < best_loss:
+                best_loss = loss.item()
+                best_adv_image = adv_image_tensor.clone().detach().cpu()
+
+            if early_stopping == "True" and text == targeted_plan_result:
+                data.append([i, text])
+                break
+
             grad = torch.autograd.grad(loss, inputs["pixel_values"], retain_graph=False, create_graph=False)[0]
-            #grad = grad.mean(dim=2).squeeze().sign().cpu()
             grad = grad[:, :, 0].squeeze().sign().cpu()
-            #grad=inputs["pixel_values"].grad.mean(dim=2).squeeze().sign().cpu()
 
             with torch.no_grad():
                 adv_image_tensor.data = adv_image_tensor.data - float(alpha) * grad
@@ -235,7 +217,6 @@ class Llama3Vision:
                 })
                 data.append([i, text])
 
-            # Memory management: delete large tensors and clear cache
             for k, v in inputs.items():
                 if torch.is_tensor(v):
                     del v
@@ -246,7 +227,8 @@ class Llama3Vision:
         if wandb_run is not None:
             response_table = wandb.Table(columns=columns, data=data)
             wandb.log({"model_responses": response_table})
-        return text, adv_image_tensor.detach().cpu()
+            wandb_run.log({"final_adv_image": wandb.Image(T.ToPILImage()(best_adv_image.clone().detach().squeeze().cpu()))})
+        return text, best_adv_image.detach().cpu()
 
 
     def process_images(self,
@@ -325,7 +307,7 @@ class Llama3Vision:
             return text
         return cpu_outputs
     
-    def choose_consistent_prediction(self, preds, threshold=0.8):
+    def choose_consistent_prediction(self, preds, threshold=0.8, sim_model=None):
         """
         Returns the majority prediction only if it's semantically close
         (>= threshold) to at least half of the other predictions.
@@ -338,8 +320,8 @@ class Llama3Vision:
         majority_pred, _ = Counter(preds).most_common(1)[0]
 
         # Encode once
-        emb_majority = self.sim_model.encode(majority_pred, convert_to_tensor=True)
-        emb_all = self.sim_model.encode(preds, convert_to_tensor=True)
+        emb_majority = sim_model.encode(majority_pred, convert_to_tensor=True)
+        emb_all = sim_model.encode(preds, convert_to_tensor=True)
 
         # Compute cosine similarities
         sims = util.cos_sim(emb_majority, emb_all).squeeze().cpu().numpy()
@@ -367,6 +349,10 @@ class Llama3Vision:
                                    N=10,
                                    sigma=0.1,
                                    wandb_run=None) -> str:
+        sim_model = SentenceTransformer('all-MiniLM-L6-v2').to(self.device)
+        for p in sim_model.parameters():
+            p.requires_grad_(False)
+
         # Always expect a single image
         if isinstance(images, list):
             if len(images) != 1:
@@ -444,7 +430,7 @@ class Llama3Vision:
             gc.collect()
             torch.cuda.empty_cache()
 
-        smoothed_pred = self.choose_consistent_prediction(preds, threshold=0.8)
+        smoothed_pred = self.choose_consistent_prediction(preds, threshold=0.8, sim_model=sim_model)
         logger.info(f"Smoothed prediction: {smoothed_pred}")
 
         if wandb_run is not None:
