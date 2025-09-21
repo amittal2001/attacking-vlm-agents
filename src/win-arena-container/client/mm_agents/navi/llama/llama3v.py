@@ -480,7 +480,7 @@ class Llama3Vision:
             if wandb_run is not None:
                 wandb_run.log({
                     "step": n,
-                    "image": wandb.Image(noisy_image),
+                    "noisy_image": wandb.Image(noisy_image),
                 })
                 data.append([n, text])
             
