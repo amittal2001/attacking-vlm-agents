@@ -66,6 +66,7 @@ if __name__ == "__main__":
 
     model = Llama3Vision(
         model_id="meta-llama/Llama-3.2-11B-Vision-Instruct",
+        verbose=True,
     )
 
     # =========================

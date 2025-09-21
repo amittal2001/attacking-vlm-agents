@@ -26,9 +26,11 @@ class Llama3Vision:
                  device: Optional[str] = None,
                  dtype: Optional[torch.dtype] = None,
                  use_quantized: bool = False,
-                 local_files_only: bool = False,):
+                 local_files_only: bool = False,
+                 verbose: bool = False):
         self.model_id = model_id
         self.local_files_only = local_files_only
+        self.verbose = verbose
         # auto-select device
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -42,11 +44,14 @@ class Llama3Vision:
             self.dtype = dtype
 
         # Load processor (handles image + text preproc)
-        logger.info(f"Loading processor from {model_id} (local_files_only={local_files_only})")
+        if self.verbose:
+            logger.info(f"Loading processor from {model_id} (local_files_only={local_files_only})")
         self.processor = AutoProcessor.from_pretrained(model_id, local_files_only=local_files_only)
+        self.eot_token = 128001  # <|end_of_text|> token id
 
         # Load model with 4-bit quantization using bitsandbytes
-        logger.info(f"Loading model {model_id} in 4-bit quantized mode on {self.device} dtype={self.dtype}")
+        if self.verbose:
+            logger.info(f"Loading model {model_id} in 4-bit quantized mode on {self.device} dtype={self.dtype}")
         quant_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.float16,
@@ -67,7 +72,8 @@ class Llama3Vision:
         # move to device (if not using device_map)
         self.model.to(self.device)
 
-        logger.info(f"Loading model all-MiniLM-L6-v2 on {self.device} dtype={self.dtype}")
+        if self.verbose:
+            logger.info(f"Loading model all-MiniLM-L6-v2 on {self.device} dtype={self.dtype}")
     
         self.loss_fn = torch.nn.CrossEntropyLoss()
 
@@ -124,7 +130,7 @@ class Llama3Vision:
         if not isinstance(images, Image.Image):
             raise ValueError("images must be a PIL Image or list of one image.")
 
-        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
+        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question + "\n"
 
         
         if wandb_run is not None:
@@ -134,8 +140,12 @@ class Llama3Vision:
             wandb_run.log({"prompt": prompt_table})
 
         device = self.device
-        logger.info(f"Prompt: {prompt}")
-        logger.info(f"Device: {device}")
+        if self.verbose:
+            logger.info(f"Prompt: {prompt}")
+            logger.info(f"targeted_plan_result: {targeted_plan_result}")
+            logger.info(f"Device: {device}")
+
+        prompt = prompt + targeted_plan_result
 
         transform = T.ToTensor()
         image_tensor = transform(images.resize((560, 560)).convert("RGB")).unsqueeze(0).cpu()
@@ -146,6 +156,27 @@ class Llama3Vision:
         if wandb_run is not None:
             columns = ["step", "response"]
             data = []
+
+        # Tokenize the target string
+        target_tokens = self.processor.tokenizer(
+            targeted_plan_result,
+            return_tensors="pt",
+            add_special_tokens=False
+        )["input_ids"].squeeze(0)
+        target_tokens = torch.cat((target_tokens, torch.tensor([self.eot_token])))  # Append EOT token
+        target_token_strings = [self.processor.tokenizer.decode(t.item(), skip_special_tokens=False) for t in target_tokens]
+        if self.verbose:
+            logger.info(f"Target tokens: {target_tokens.tolist()}")
+            logger.info(f"Target token strings: {target_token_strings}")
+
+        inputs = self.processor(images=images, text=prompt, return_tensors="pt")
+        input_text=""
+        for token_id in inputs['input_ids'].squeeze():
+            token = self.processor.decode(token_id, skip_special_tokens=False)
+            input_text += token
+        if self.verbose:
+            logger.info(f"Input token ids: {inputs['input_ids'].squeeze().tolist()}")
+            logger.info(f"Input text: {input_text}")
 
         for i in range(num_steps):
             adv_image = T.ToPILImage()(adv_image_tensor.clone().detach().squeeze().cpu())
@@ -166,30 +197,32 @@ class Llama3Vision:
                 inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
 
             # Forward pass
-            logger.info(f"Starting {i} forward pass...")
             outputs = self.model(**inputs)
-            logger.info(f"Finished {i} forward pass...")
             logits = outputs.logits  # [batch, seq_len, vocab_size]
+            last_tokens_logits = logits[:, -target_tokens.size(0):, :]  # [batch, target_len, vocab_size]
 
-            pred_ids = logits.argmax(dim=-1)
-            next_token_id = pred_ids[0, -1].unsqueeze(0)
-            text = self.processor.decode(next_token_id, skip_special_tokens=True)
-            logger.info(f"Predicted text for step {i}: {text}")
-            
-            # Tokenize the target string
-            target_tokens = self.processor.tokenizer(
-                targeted_plan_result,
-                return_tensors="pt",
-                add_special_tokens=False
-            )["input_ids"]
+            pred_ids = logits.argmax(dim=-1).squeeze()
+            next_tokens_ids = pred_ids[-target_tokens.size(0):]
+            text=""
+            for token_id in next_tokens_ids:
+                token = self.processor.decode(token_id, skip_special_tokens=False)
+                if token != "<|end_of_text|>":
+                    text += token
+            if self.verbose:
+                logger.info(f"Predicted ids: {pred_ids.tolist()}")
+                logger.info(f"Next token ids: {next_tokens_ids.tolist()}")
+                logger.info(f"Predicted text for step {i}: {text}")
 
-            next_token_logits = logits[0, -1].to(device)
-            target_token = target_tokens[0, 0].to(device)
-            loss = self.loss_fn(next_token_logits.unsqueeze(0), target_token.unsqueeze(0))
+            loss=0
+            for token_idx, target_token in enumerate(target_tokens):
+                next_token_logits = last_tokens_logits[0, token_idx]
+                token_loss = self.loss_fn(next_token_logits.unsqueeze(0).to(device), target_token.unsqueeze(0).to(device))
+                if self.verbose:
+                    logger.info(f"Token loss for step {i}, token {token_idx}: {token_loss.item()}")
+                loss += token_loss
 
-            logger.info(f"Loss for step {i}: {loss.item()}")
-            logger.info(f"next token logits for step {i}: {next_token_logits.max().item()} for token {text}")
-            logger.info(f"target token logits for step {i}: {next_token_logits[target_token.item()].item()} for token {targeted_plan_result}")
+            if self.verbose:
+                logger.info(f"Loss for step {i}: {loss.item()}")
 
             if loss.item() < best_loss:
                 best_loss = loss.item()
@@ -197,6 +230,7 @@ class Llama3Vision:
 
             if early_stopping == "True" and text == targeted_plan_result:
                 data.append([i, text])
+                best_adv_image = adv_image_tensor.clone().detach().cpu()
                 break
 
             grad = torch.autograd.grad(loss, inputs["pixel_values"], retain_graph=False, create_graph=False)[0]
@@ -212,8 +246,6 @@ class Llama3Vision:
                     "step": i,
                     "adv_image": wandb.Image(T.ToPILImage()(adv_image_tensor.clone().detach().squeeze().cpu())),
                     "loss": loss.item(),
-                    "logits_max_next_token": next_token_logits.max().item(),
-                    "logits_target_token": next_token_logits[target_token.item()].item()
                 })
                 data.append([i, text])
 
@@ -235,7 +267,7 @@ class Llama3Vision:
                        system_prompt: str,
                        question: str,
                        images: Union[str, Image.Image, List[Union[str, Image.Image]]],
-                       max_tokens=100,
+                       max_tokens=256,
                        temperature=0,
                        only_text=True,
                        format="JPEG",
@@ -260,7 +292,7 @@ class Llama3Vision:
         if not isinstance(images, Image.Image):
             raise ValueError("images must be a PIL Image or list of one image.")
 
-        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
+        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question + "\n"
 
         if wandb_run is not None:
             wandb_run.log({"input_image": wandb.Image(images)})
@@ -269,10 +301,18 @@ class Llama3Vision:
             wandb_run.log({"prompt": prompt_table})
 
         device = self.device
-        logger.info(f"Prompt: {prompt}")
-        logger.info(f"Device: {device}")
+        if self.verbose:
+            logger.info(f"Prompt: {prompt}")
+            logger.info(f"Device: {device}")
 
         inputs = self.processor(images=images, text=prompt, return_tensors="pt")
+        input_text=""
+        for token_id in inputs['input_ids'].squeeze():
+            token = self.processor.decode(token_id, skip_special_tokens=False)
+            input_text += token
+        if self.verbose:
+            logger.info(f"Input token ids: {inputs['input_ids'].squeeze().tolist()}")
+            logger.info(f"Input text: {input_text}")
 
         for k, v in inputs.items():
             if torch.is_tensor(v):
@@ -283,14 +323,17 @@ class Llama3Vision:
             inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
 
         # Generate
-        logger.info(f"Starting forward pass...")
         with torch.no_grad():
-            outputs = self.model.generate(**inputs, max_new_tokens=max_tokens)
-        logger.info(f"Finished forward pass...")
-
+            outputs = self.model.generate(**inputs,
+                                          do_sample=False,              # disable sampling
+                                          temperature=1.0,              # ignored when do_sample=False
+                                          top_p=1.0,                    # ignored when do_sample=False
+                                          max_new_tokens=max_tokens,    # stop after max_tokens new tokens
+                                          eos_token_id=self.eot_token,)
         prompt_len = inputs["input_ids"].shape[1]
         text = self.processor.decode(outputs[0][prompt_len:], skip_special_tokens=True)
-        logger.info(f"Predicted text: {text}")
+        if self.verbose:
+            logger.info(f"Predicted text: {text}")
 
         if wandb_run is not None:
             table = wandb.Table(columns=["model_response"])
@@ -326,8 +369,9 @@ class Llama3Vision:
         # Compute cosine similarities
         sims = util.cos_sim(emb_majority, emb_all).squeeze().cpu().numpy()
 
-        logger.info(f"sims: {sims}")
-        logger.info(f"preds: {preds}")
+        if self.verbose:
+            logger.info(f"sims: {sims}")
+            logger.info(f"preds: {preds}")
 
         # Count how many are >= threshold (excluding self if you want)
         count_close = (sims >= threshold).sum()
@@ -342,7 +386,7 @@ class Llama3Vision:
                                    system_prompt: str,
                                    question: str,
                                    images: Union[str, Image.Image, List[Union[str, Image.Image]]],
-                                   max_tokens=100,
+                                   max_tokens=256,
                                    temperature=0,
                                    only_text=True,
                                    format="JPEG",
@@ -373,7 +417,7 @@ class Llama3Vision:
         if not isinstance(images, Image.Image):
             raise ValueError("images must be a PIL Image or list of one image.")
         
-        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question
+        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question + "\n"
 
         if wandb_run is not None:
             wandb_run.log({"input_image": wandb.Image(images)})
@@ -382,8 +426,18 @@ class Llama3Vision:
             wandb_run.log({"prompt": prompt_table})
 
         device = self.device
-        logger.info(f"Prompt: {prompt}")
-        logger.info(f"Device: {device}")
+        if self.verbose:
+            logger.info(f"Prompt: {prompt}")
+            logger.info(f"Device: {device}")
+
+        inputs = self.processor(images=images, text=prompt, return_tensors="pt")
+        input_text=""
+        for token_id in inputs['input_ids'].squeeze():
+            token = self.processor.decode(token_id, skip_special_tokens=False)
+            input_text += token
+        if self.verbose:
+            logger.info(f"Input token ids: {inputs['input_ids'].squeeze().tolist()}")
+            logger.info(f"Input text: {input_text}")
 
         add_noise = T.Compose([
             T.ToTensor(),
@@ -408,15 +462,19 @@ class Llama3Vision:
                 inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
 
             # Generate
-            logger.info(f"Starting {n} forward pass...")
             with torch.no_grad():
-                outputs = self.model.generate(**inputs, max_new_tokens=max_tokens)
-            logger.info(f"Finished {n} forward pass...")
+                outputs = self.model.generate(**inputs,
+                                              do_sample=False,              # disable sampling
+                                              temperature=1.0,              # ignored when do_sample=False
+                                              top_p=1.0,                    # ignored when do_sample=False
+                                              max_new_tokens=max_tokens,    # stop after max_tokens new tokens
+                                              eos_token_id=self.eot_token,)
 
             # Get how many tokens came from the prompt
             prompt_len = inputs["input_ids"].shape[1]
             text = self.processor.decode(outputs[0][prompt_len:], skip_special_tokens=True)
-            logger.info(f"{n}'th answer: {text}")
+            if self.verbose:
+                logger.info(f"{n}'th answer: {text}")
             preds.append(text)
 
             if wandb_run is not None:
@@ -430,8 +488,9 @@ class Llama3Vision:
             gc.collect()
             torch.cuda.empty_cache()
 
-        smoothed_pred = self.choose_consistent_prediction(preds, threshold=0.8, sim_model=sim_model)
-        logger.info(f"Smoothed prediction: {smoothed_pred}")
+        smoothed_pred = self.choose_consistent_prediction(preds, threshold=0.75, sim_model=sim_model)
+        if self.verbose:
+            logger.info(f"Smoothed prediction: {smoothed_pred}")
 
         if wandb_run is not None:
             response_table = wandb.Table(columns=columns, data=data)
