@@ -77,6 +77,60 @@ class Llama3Vision:
     
         self.loss_fn = torch.nn.CrossEntropyLoss()
 
+        self.question_examples = [
+            "Summarize what is happening here.",
+            "List the main elements you notice.",
+            "What stands out the most?",
+            "Give me a quick headline for this.",
+            "Explain this like you are talking to a child.",
+            "What is the overall mood or vibe?",
+            "How might this be used in a story?",
+            "Suggest a short title for this scene.",
+            "What could happen right after this moment?",
+            "Turn this into a short question.",
+            "Describe this in five words or less.",
+            "What is unusual here?",
+            "Give one possible context for this.",
+            "What emotion does this suggest?",
+            "Who or what is the focus?",
+            "Summarize this as a tweet.",
+            "Give me a one-word reaction.",
+            "What is happening in the background?",
+            "What could this image represent?",
+            "How would you label this?",
+            "What is the main contrast?",
+            "Explain this in one sentence.",
+            "What type of setting is this?",
+            "Name three details you notice.",
+            "What is the central theme?",
+            "What action is implied here?",
+            "Give me a metaphor for this.",
+            "What story could this start?",
+            "Which object feels most important?",
+            "What is the first thing you see?",
+            "Summarize this as a headline.",
+            "How would you describe this scene quickly?",
+            "What is happening that might be hidden?",
+            "What is the main relationship shown?",
+            "If this were a book cover, what would it say?",
+            "What question does this raise?",
+            "What kind of atmosphere is shown?",
+            "What word best describes this?",
+            "How might this make someone feel?",
+            "Give me a possible caption.",
+            "What is clearly visible?",
+            "What seems ambiguous?",
+            "If this were a movie scene, what genre?",
+            "What detail might people overlook?",
+            "How would a child describe this?",
+            "What is an alternate interpretation?",
+            "What clue suggests context here?",
+            "What is happening right now?",
+            "What is about to happen next?",
+            "What is the simplest way to explain this?"
+        ]
+
+
     # --- helpers to encode or wrap image ---
     def encode_image(self, image: Union[str, Image.Image], format="JPEG") -> str:
         if isinstance(image, str):
@@ -129,23 +183,28 @@ class Llama3Vision:
                 raise ValueError("Tensor must be shape [C,H,W] or [1,C,H,W]")
         if not isinstance(images, Image.Image):
             raise ValueError("images must be a PIL Image or list of one image.")
-
-        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question + "\n"
-
         
-        if wandb_run is not None:
-            wandb_run.log({"original_image": wandb.Image(images)})
-            prompt_table = wandb.Table(columns=["prompt"])
-            prompt_table.add_data(prompt)
-            wandb_run.log({"prompt": prompt_table})
-
         device = self.device
         if self.verbose:
-            logger.info(f"Prompt: {prompt}")
-            logger.info(f"targeted_plan_result: {targeted_plan_result}")
             logger.info(f"Device: {device}")
+            logger.info(f"targeted_plan_result: {targeted_plan_result}")
+            logger.info(f"user question: {question}")
 
-        prompt = prompt + targeted_plan_result
+
+        if question != "any":
+            prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question + "\n"
+
+            if wandb_run is not None:
+                wandb_run.log({"original_image": wandb.Image(images)})
+                prompt_table = wandb.Table(columns=["prompt"])
+                prompt_table.add_data(prompt)
+                wandb_run.log({"prompt": prompt_table})
+
+            if self.verbose:
+                logger.info(f"Prompt: {prompt}")
+
+            prompt = prompt + targeted_plan_result
+
 
         transform = T.ToTensor()
         image_tensor = transform(images.resize((560, 560)).convert("RGB")).unsqueeze(0).cpu()
@@ -157,7 +216,7 @@ class Llama3Vision:
             columns = ["step", "response"]
             data = []
 
-        # Tokenize the target string
+        # Tokenize the target 
         target_tokens = self.processor.tokenizer(
             targeted_plan_result,
             return_tensors="pt",
@@ -169,17 +228,25 @@ class Llama3Vision:
             logger.info(f"Target tokens: {target_tokens.tolist()}")
             logger.info(f"Target token strings: {target_token_strings}")
 
-        inputs = self.processor(images=images, text=prompt, return_tensors="pt")
-        input_text=""
-        for token_id in inputs['input_ids'].squeeze():
-            token = self.processor.decode(token_id, skip_special_tokens=False)
-            input_text += token
-        if self.verbose:
-            logger.info(f"Input token ids: {inputs['input_ids'].squeeze().tolist()}")
-            logger.info(f"Input text: {input_text}")
+        if question != "any":
+            inputs = self.processor(images=images, text=prompt, return_tensors="pt")
+            input_text=""
+            for token_id in inputs['input_ids'].squeeze():
+                token = self.processor.decode(token_id, skip_special_tokens=False)
+                input_text += token
+            if self.verbose:
+                logger.info(f"Input token ids: {inputs['input_ids'].squeeze().tolist()}")
+                logger.info(f"Input text: {input_text}")
 
+        succesive_success = 0
         for i in range(num_steps):
             adv_image = T.ToPILImage()(adv_image_tensor.clone().detach().squeeze().cpu())
+            if question == "any":
+                rand_idx = torch.randint(0, len(self.question_examples), (1,)).item()
+                prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + self.question_examples[rand_idx] + "\n"
+                if self.verbose:
+                    logger.info(f"Prompt for step {i}: {prompt}")
+                prompt = prompt + targeted_plan_result
             inputs = self.processor(images=adv_image, text=prompt, return_tensors="pt")
 
             for k, v in inputs.items():
@@ -187,10 +254,6 @@ class Llama3Vision:
                     inputs[k] = v.to(device)
 
             inputs["pixel_values"].requires_grad_(requires_grad=True)
-            gen_kwargs = dict(max_new_tokens=max_tokens,
-                            do_sample=(temperature > 0),
-                            temperature=temperature,
-                            top_p=0.95)
 
             # Ensure aspect_ratio_ids is long if present
             if "aspect_ratio_ids" in inputs:
@@ -229,9 +292,17 @@ class Llama3Vision:
                 best_adv_image = adv_image_tensor.clone().detach().cpu()
 
             if early_stopping == "True" and text == targeted_plan_result:
+                succesive_success += 1
+                if self.verbose:
+                    logger.info(f"Early stopping success count: {succesive_success}")
                 data.append([i, text])
                 best_adv_image = adv_image_tensor.clone().detach().cpu()
-                break
+                if question != "any":
+                    break
+                if succesive_success >= len(self.question_examples) // 2:
+                    break
+            else:
+                succesive_success = 0
 
             grad = torch.autograd.grad(loss, inputs["pixel_values"], retain_graph=False, create_graph=False)[0]
             grad = grad[:, :, 0].squeeze().sign().cpu()

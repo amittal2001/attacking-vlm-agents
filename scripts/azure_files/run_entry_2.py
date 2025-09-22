@@ -19,28 +19,26 @@ def main():
     alpha = sys.argv[11]
     num_steps = sys.argv[12]
     early_stopping = sys.argv[13]
-    N = sys.argv[14]
-    sigma = sys.argv[15]
-    target_action = sys.argv[16]
-    wandb_key = sys.argv[17]
-    hugginface_key = sys.argv[18]
-    som_origin = sys.argv[19]
-    a11y_backend = sys.argv[20]
+    question = sys.argv[14]
+    N = sys.argv[15]
+    sigma = sys.argv[16]
+    target_action = sys.argv[17]
+    wandb_key = sys.argv[18]
+    hugginface_key = sys.argv[19]
+    som_origin = sys.argv[20]
+    a11y_backend = sys.argv[21]
 
     # print all args
     print("Arguments:")
     arg_names = [
         "storage_path", "mounted_output_path", "exp_name", "num_workers", "worker_id", "agent", "json_name",
-        "model_name", "run_mode", "epsilon", "alpha", "num_steps", "early_stopping", "N", "sigma", "target_action",
+        "model_name", "run_mode", "epsilon", "alpha", "num_steps", "early_stopping", "question", "N", "sigma", "target_action",
         "wandb_key", "hugginface_key", "som_origin", "a11y_backend"
     ]
     for i, name in enumerate(arg_names, start=1):
         print(f"  {name}: {sys.argv[i]}")
 
     print("Starting entry script...")
-
-    # print("Folder at ./:")
-    # subprocess.run(['ls', '-la'], check=True)
 
     # create a folder with the specified path and experiment name
     result_dir = os.path.join(mounted_output_path, exp_name)
@@ -49,26 +47,6 @@ def main():
     # create a simple file with the current date and time in both the file name and content
     with open(os.path.join(result_dir, f"output_{exp_name}_worker_{str(worker_id)}.txt"), "w") as f:
         f.write(f"Output file created at {time.ctime()}")
-    
-    # a few debugging commands  
-    # try:  
-    #     subprocess.check_call(["ip", "link", "add", "dummy0", "type", "dummy"])  
-    #     print("NET_ADMIN capability is enabled")  
-    # except subprocess.CalledProcessError:  
-    #     print("NET_ADMIN capability is not enabled")  
-    
-    # print("------------------\n\n")  
-    
-    # try:    
-    #     subprocess.check_call(["iptables", "-A", "INPUT", "-p", "tcp", "--dport", "9999", "-j", "ACCEPT"])  
-    #     print("NET_ADMIN capability is enabled")  
-    #     subprocess.check_call(["iptables", "-D", "INPUT", "-p", "tcp", "--dport", "9999", "-j", "ACCEPT"])  
-    # except subprocess.CalledProcessError:    
-    #     print("NET_ADMIN capability is not enabled")   
-
-    # launches the client script    
-    # print("display the content of /client")  
-    # os.system("ls -l /client")  
 
     # launches the client script using subprocess for safe argument passing
     cmd = [
@@ -85,6 +63,7 @@ def main():
         "--alpha", alpha,
         "--num_steps", num_steps,
         "--early_stopping", early_stopping,
+        "--question", question,
         "--N", N,
         "--sigma", sigma,
         "--target_action", target_action,

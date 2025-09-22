@@ -2,6 +2,7 @@ import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
 import argparse
 import wandb
+os.environ["WANDB_SILENT"] = "true"
 from huggingface_hub import login
 from mm_agents.navi.llama.llama3v import Llama3Vision
 import base64, io, logging, sys
@@ -29,6 +30,7 @@ def parse_args():
     parser.add_argument('--alpha', type=float, required=True)
     parser.add_argument('--num_steps', type=int, required=True)
     parser.add_argument('--early_stopping', type=str, required=True)
+    parser.add_argument('--question', type=str, required=True)
     parser.add_argument('--target_action', type=str, required=True)
     parser.add_argument('--N', type=int, required=False)
     parser.add_argument('--sigma', type=float, required=False)
@@ -57,7 +59,6 @@ if __name__ == "__main__":
     # ========================
 
     system_prompt = "You are a helpful assistant."
-    question = "Describe the content of this image shortly."
     targeted_plan_result = args.target_action
 
     # =========================
@@ -82,13 +83,14 @@ if __name__ == "__main__":
             "epsilon": args.epsilon,
             "alpha": args.alpha,
             "iters": args.num_steps,
-            "early_stopping": args.early_stopping
+            "early_stopping": args.early_stopping,
+            "user_question": args.question
         }
     )
 
     text, adv_image_tensor = model.pgd_process_images(
         system_prompt=system_prompt,
-        question=question,
+        question=args.question,
         images=img,
         targeted_plan_result=targeted_plan_result,  
         num_steps=args.num_steps,
@@ -104,6 +106,7 @@ if __name__ == "__main__":
     #  Run process_images
     # =========================
 
+    question = "Describe the content of this image shortly."
 
     if int(args.N) != 0:
         torch.cuda.empty_cache()

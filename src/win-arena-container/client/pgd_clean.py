@@ -2,6 +2,7 @@ import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
 import argparse
 import wandb
+os.environ["WANDB_SILENT"] = "true"
 from huggingface_hub import login
 from mm_agents.navi.llama.llama3v import Llama3Vision
 import base64, io, logging, sys
