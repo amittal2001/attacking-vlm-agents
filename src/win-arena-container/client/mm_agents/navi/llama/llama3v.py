@@ -129,6 +129,8 @@ class Llama3Vision:
             "What is about to happen next?",
             "What is the simplest way to explain this?"
         ]
+        self.harmfull_prompts = [
+        ]
 
 
     # --- helpers to encode or wrap image ---
@@ -149,7 +151,6 @@ class Llama3Vision:
         mime = "jpeg" if format.upper() == "JPEG" else "png"
         return {"type": "image_url", "image_url": {"url": f"data:image/{mime};base64,{base64_image}"}}
 
-    # --- main multimodal call ---
     def pgd_process_images(self,
                            system_prompt: str,
                            question: str,
@@ -572,3 +573,168 @@ class Llama3Vision:
             wandb_run.log({"model_final_response": final_response_table})
 
         return smoothed_pred
+
+
+    def jail_break_process_images(self,
+                           system_prompt: str,
+                           question: str,
+                           images: Union[torch.Tensor, Image.Image, List[Image.Image]],
+                           targeted_plan_result: str,
+                           max_tokens=512,
+                           temperature=0.0,
+                           only_text=True,
+                           format="JPEG",
+                           num_steps=1,
+                           alpha=0.01,
+                           epsilon=0.03,
+                           early_stopping="True",
+                           wandb_run=None) -> tuple:
+        # Always expect a single image
+        if isinstance(images, list):
+            if len(images) != 1:
+                raise ValueError(f"Expected a single image, got {len(images)}.")
+            images = images[0]
+        # If tensor, convert to PIL Image
+        if isinstance(images, torch.Tensor):
+            if images.dim() == 4 and images.shape[0] == 1:
+                images = images.squeeze(0)
+            if images.dim() == 3:
+                # Clamp and convert to uint8 if needed
+                if images.max() <= 1.0:
+                    images = images.clamp(0, 1)
+                    images = (images * 255).to(torch.uint8)
+                images = T.ToPILImage()(images.cpu())
+            else:
+                raise ValueError("Tensor must be shape [C,H,W] or [1,C,H,W]")
+        if not isinstance(images, Image.Image):
+            raise ValueError("images must be a PIL Image or list of one image.")
+        
+        device = self.device
+        if self.verbose:
+            logger.info(f"Device: {device}")
+            logger.info(f"targeted_plan_result: {targeted_plan_result}")
+            logger.info(f"user question: {question}")
+
+
+        prompt = (system_prompt or "You are a helpful assistant.") + "\n\n<|image|>\n" + question + "\n"
+
+        if wandb_run is not None:
+            wandb_run.log({"original_image": wandb.Image(images)})
+            prompt_table = wandb.Table(columns=["prompt"])
+            prompt_table.add_data(prompt)
+            wandb_run.log({"prompt": prompt_table})
+
+        if self.verbose:
+            logger.info(f"Prompt: {prompt}")
+
+        prompt = prompt + targeted_plan_result
+
+
+        transform = T.ToTensor()
+        image_tensor = transform(images.resize((560, 560)).convert("RGB")).unsqueeze(0).cpu()
+        adv_image_tensor = image_tensor.clone().detach().cpu()
+        best_loss = float("inf")
+        best_adv_image = adv_image_tensor.clone().detach().cpu()
+
+        if wandb_run is not None:
+            columns = ["step", "response"]
+            data = []
+
+        # Tokenize the target 
+        target_tokens = self.processor.tokenizer(
+            targeted_plan_result,
+            return_tensors="pt",
+            add_special_tokens=False
+        )["input_ids"].squeeze(0)
+        target_token_strings = [self.processor.tokenizer.decode(t.item(), skip_special_tokens=False) for t in target_tokens]
+        if self.verbose:
+            logger.info(f"Target tokens: {target_tokens.tolist()}")
+            logger.info(f"Target token strings: {target_token_strings}")
+
+        inputs = self.processor(images=images, text=prompt, return_tensors="pt")
+        input_text=""
+        for token_id in inputs['input_ids'].squeeze():
+            token = self.processor.decode(token_id, skip_special_tokens=False)
+            input_text += token
+        if self.verbose:
+            logger.info(f"Input token ids: {inputs['input_ids'].squeeze().tolist()}")
+            logger.info(f"Input text: {input_text}")
+
+        for i in range(num_steps):
+            adv_image = T.ToPILImage()(adv_image_tensor.clone().detach().squeeze().cpu())
+            inputs = self.processor(images=adv_image, text=prompt, return_tensors="pt")
+
+            for k, v in inputs.items():
+                if torch.is_tensor(v):
+                    inputs[k] = v.to(device)
+
+            inputs["pixel_values"].requires_grad_(requires_grad=True)
+
+            # Ensure aspect_ratio_ids is long if present
+            if "aspect_ratio_ids" in inputs:
+                inputs["aspect_ratio_ids"] = inputs["aspect_ratio_ids"].long()
+
+            # Forward pass
+            outputs = self.model(**inputs)
+            logits = outputs.logits  # [batch, seq_len, vocab_size]
+            last_tokens_logits = logits[:, -target_tokens.size(0)-1:-1, :]  # [batch, target_len, vocab_size]
+
+            pred_ids = logits.argmax(dim=-1).squeeze()
+            next_tokens_ids = pred_ids[-target_tokens.size(0)-1:-1]
+            text=""
+            for token_id in next_tokens_ids:
+                token = self.processor.decode(token_id, skip_special_tokens=False)
+                text += token
+            if self.verbose:
+                logger.info(f"Predicted ids: {pred_ids.tolist()}")
+                logger.info(f"Next token ids: {next_tokens_ids.tolist()}")
+                logger.info(f"Predicted text for step {i}: {text}")
+
+            loss=0
+            for token_idx, target_token in enumerate(target_tokens):
+                next_token_logits = last_tokens_logits[0, token_idx]
+                token_loss = self.loss_fn(next_token_logits.unsqueeze(0).to(device), target_token.unsqueeze(0).to(device))
+                if self.verbose:
+                    logger.info(f"Token loss for step {i}, token {token_idx}: {token_loss.item()}")
+                loss += token_loss
+
+            if self.verbose:
+                logger.info(f"Loss for step {i}: {loss.item()}")
+
+            if loss.item() < best_loss:
+                best_loss = loss.item()
+                best_adv_image = adv_image_tensor.clone().detach().cpu()
+
+            if early_stopping == "True" and text == targeted_plan_result:
+                data.append([i, text])
+                best_adv_image = adv_image_tensor.clone().detach().cpu()
+                break
+
+            grad = torch.autograd.grad(loss, inputs["pixel_values"], retain_graph=False, create_graph=False)[0]
+            grad = grad[:, :, 0].squeeze().sign().cpu()
+
+            with torch.no_grad():
+                adv_image_tensor.data = adv_image_tensor.data - float(alpha) * grad
+                adv_image_tensor.data = torch.min(torch.max(adv_image_tensor.data, image_tensor.data - float(epsilon)), image_tensor.data + float(epsilon))
+                adv_image_tensor.data = torch.clamp(adv_image_tensor.data, 0, 1)  
+
+            if wandb_run is not None:
+                wandb_run.log({
+                    "step": i,
+                    "adv_image": wandb.Image(T.ToPILImage()(adv_image_tensor.clone().detach().squeeze().cpu())),
+                    "loss": loss.item(),
+                })
+                data.append([i, text])
+
+            for k, v in inputs.items():
+                if torch.is_tensor(v):
+                    del v
+            del loss, grad, outputs, logits
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        if wandb_run is not None:
+            response_table = wandb.Table(columns=columns, data=data)
+            wandb.log({"model_responses": response_table})
+            wandb_run.log({"final_adv_image": wandb.Image(T.ToPILImage()(best_adv_image.clone().detach().squeeze().cpu()))})
+        return text, best_adv_image.detach().cpu()
