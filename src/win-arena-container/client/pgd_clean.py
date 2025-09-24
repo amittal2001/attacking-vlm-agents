@@ -45,8 +45,6 @@ if __name__ == "__main__":
 
     img_path = os.path.join("data", "backgrounds", "example_desktop.jpg")
     img = Image.open(img_path).resize((560, 560)).convert("RGB")
-    adv_img_path = os.path.join("data", "backgrounds", "adv_example_desktop.jpg")
-    adv_img = Image.open(adv_img_path).resize((560, 560)).convert("RGB")
 
     # ========================
     #  Define prompt
@@ -84,24 +82,6 @@ if __name__ == "__main__":
 
     wandb.finish()
 
-    torch.cuda.empty_cache()
-
-    wandb.login(key=args.wandb_key)
-    wandb_run = wandb.init(
-        project="mip-generator-attack",
-        name=f"Clean-Run-On-Adversarial-Image",
-        config={
-        }
-    )
-
-    response = model.process_images(
-        system_prompt=system_prompt,
-        question=question,
-        images=adv_img,
-        wandb_run=wandb_run
-    )
-
-    wandb.finish()
 
 
     
