@@ -154,7 +154,7 @@ def launch_vm_and_job(  worker_id,
 
             time.sleep(poll_interval)
 
-    idle_time_before_shutdown_minutes=120
+    idle_time_before_shutdown_minutes=180
     # size="Standard_D8_v3"
 
     size="Standard_NC4as_T4_v3"        #  16 GB
