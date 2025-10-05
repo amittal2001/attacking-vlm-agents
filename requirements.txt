@@ -1,5 +1,11 @@
 --extra-index-url https://download.pytorch.org/whl/cu122
 
+setuptools
+azure-ai-ml
+azure-identity
+azureml-core
+azureml-dataset-runtime
+pandas
 torch==2.4.1
 torchvision==0.19.1
 peft>=0.17.1

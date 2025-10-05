@@ -29,6 +29,15 @@ def main():
     a11y_backend = sys.argv[21]
 
     # print all args
+    # Install missing dependencies
+    print("Installing missing Python dependencies...")
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "gymnasium==0.28.1"],
+                      check=True, capture_output=True, text=True)
+        print("✓ gymnasium installed successfully")
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: Could not install gymnasium: {e.stderr}")
+
     print("Arguments:")
     arg_names = [
         "storage_path", "mounted_output_path", "exp_name", "num_workers", "worker_id", "agent", "json_name",

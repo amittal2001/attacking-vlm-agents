@@ -5,6 +5,11 @@ cd /
 
 echo "Starting WinArena..."
 
+# Install missing dependencies at runtime
+echo "Installing missing Python dependencies..."
+pip install --no-cache-dir gymnasium~=0.28.1 2>&1 | grep -v "Requirement already satisfied" || true
+echo "Dependencies installed"
+
 prepare_image=false
 start_client=true
 agent="navi"

@@ -154,10 +154,10 @@ def launch_vm_and_job(  worker_id,
 
             time.sleep(poll_interval)
 
-    idle_time_before_shutdown_minutes=180
-    # size="Standard_D8_v3"
+    idle_time_before_shutdown_minutes=120
+    size="Standard_D8_v3"  # WAA recommended: supports nested virtualization
 
-    size="Standard_NC4as_T4_v3"        #  16 GB
+    # size="Standard_NC4as_T4_v3"        #  16 GB - GPU instance, no nested virt
     #size="Standard_NC24ads_A100_v4",  #  80 GB
     max_retries = 5
     for attempt in range(max_retries):
@@ -175,6 +175,7 @@ def launch_vm_and_job(  worker_id,
                 logging.info(f"Compute instance {compute_instance_name} has been started.")
             else:
                 logging.info(f"Compute instance {compute_instance_name} is already {compute_instance.state}.")
+            break  # Exit the retry loop when we have a working compute instance
         except:
             # start the compute instance, if it doesn't exist
             logging.info(f"Creating compute instance {compute_instance_name}...")

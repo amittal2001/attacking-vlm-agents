@@ -10,7 +10,7 @@ import random
 import sys
 import shutil
 import traceback
-# import wandb
+import wandb
 
 from tqdm import tqdm
 
@@ -122,7 +122,10 @@ def config() -> argparse.Namespace:
     parser.add_argument("--num_workers", type=int,  default=1, help="Total number of workers") 
 
     # benchmark difficulty level
-    parser.add_argument("--diff_lvl", type=str, default="normal", help="Difficulty level of the benchmark")  
+    parser.add_argument("--diff_lvl", type=str, default="normal", help="Difficulty level of the benchmark")
+
+    # wandb config
+    parser.add_argument("--wandb_key", type=str, default=None, help="Wandb API key for experiment tracking")
 
     args, unknownargs = parser.parse_known_args()
 
@@ -385,6 +388,27 @@ if __name__ == '__main__':
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     args = config()
     setup_logging(args)
+
+    # Initialize wandb if key is provided
+    if args.wandb_key:
+        wandb.login(key=args.wandb_key)
+        wandb.init(
+            project="waa-agent-compliance",
+            name=f"agent-{args.agent_name}-{args.model}-{datetime_str}",
+            config={
+                "agent_name": args.agent_name,
+                "model": args.model,
+                "observation_type": args.observation_type,
+                "action_space": args.action_space,
+                "max_steps": args.max_steps,
+                "worker_id": args.worker_id,
+                "trial_id": args.trial_id,
+                "test_meta_path": args.test_all_meta_path
+            }
+        )
+        logger.info("✅ Wandb initialized successfully")
+    else:
+        logger.info("⚠️ No wandb key provided, skipping wandb tracking")
 
     wait_for_server(args.emulator_ip)
 

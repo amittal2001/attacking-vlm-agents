@@ -9,6 +9,9 @@ src/win-arena-container/vm/setup/server/screenshots/screenshot.png
 *.pth
 *.pt
 
+
+config.json
+logs/
 # Credential files
 evaluation_examples/settings/googledrive/credentials.json
 
